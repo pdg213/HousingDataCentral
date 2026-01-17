@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FRED: New Home Sales (HSN1F)</title>
+
+  <!-- Simple, no-build charting via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.35; }
+    h1 { margin: 0 0 6px; }
+    .sub { color: #555; margin: 0 0 18px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 14px 0; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    canvas { max-width: 100%; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border-bottom: 1px solid #eee; padding: 10px 8px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    th { background: #fafafa; position: sticky; top: 0; }
+    .note { color: #666; font-size: 13px; margin-top: 8px; }
+    .error { color: #b00020; white-space: pre-wrap; }
+    .ok { color: #1a7f37; }
+  </style>
+</head>
+
+<body>
+  <h1>New One Family Houses Sold (HSN1F)</h1>
+  <p class="sub">
+    Source: FRED (U.S. Census Bureau / HUD). Units are “Thousands, Seasonally Adjusted Annual Rate”. :contentReference[oaicite:3]{index=3}
+  </p>
+
+  <div class="card">
+    <div id="status">Loading data…</div>
+    <div id="err" class="error"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Last 20 years (line chart)</h2>
+    <canvas id="chart" height="110"></canvas>
+    <div class="note">Chart shows the last 20 years ending at the latest available observation.</div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Most recent 18 months (table)</h2>
+    <div style="overflow:auto; max-height: 520px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Month reported</th>
+            <th>Raw data number</th>
+            <th>% change y/y</th>
+            <th>% change q/q</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="note">
+      q/q is defined as: average of last 3 months vs average of prior 3 months (percent change).
+    </div>
+  </div>
+
+<script>
+  // ==========================
+  // 1) CONFIG: paste your key
+  // ==========================
+  const FRED_API_KEY = "PASTE_YOUR_FRED_API_KEY_HERE";
+  const SERIES_ID = "HSN1F";
+
+  // FRED API endpoint for observations (JSON) :contentReference[oaicite:4]{index=4}
+  const FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations";
+
+  // ==========================
+  // 2) Helpers
+  // ==========================
+  const fmtNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const fmtPct = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+
+  function parseFredValue(v) {
+    // FRED sometimes returns "." for missing values
+    if (v === "." || v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function mean(nums) {
+    const clean = nums.filter(n => n !== null && n !== undefined);
+    if (clean.length === 0) return null;
+    const s = clean.reduce((a, b) => a + b, 0);
+    return s / clean.length;
+  }
+
+  function pctChange(curr, prev) {
+    if (curr === null || prev === null) return null;
+    if (prev === 0) return null;
+    return (curr / prev - 1) * 100;
+  }
+
+  function addYears(dateObj, years) {
+    const d = new Date(dateObj);
+    d.setFullYear(d.getFullYear() + years);
+    return d;
+  }
+
+  // ==========================
+  // 3) Fetch + transform
+  // ==========================
+  async function fetchObservations() {
+    if (!FRED_API_KEY || FRED_API_KEY.includes("PASTE_")) {
+      throw new Error("You need to paste your FRED API key into FRED_API_KEY near the top of the file.");
+    }
+
+    const url = new URL(FRED_OBS_URL);
+    url.searchParams.set("series_id", SERIES_ID);
+    url.searchParams.set("api_key", FRED_API_KEY);
+    url.searchParams.set("file_type", "json");
+
+    const resp = await fetch(url.toString());
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`FRED request failed (${resp.status}). Response:\n${txt}`);
+    }
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.observations)) {
+      throw new Error("Unexpected FRED response shape.");
+    }
+
+    // Map to {date: Date, value: number|null}
+    const obs = data.observations
+      .map(o => ({
+        date: new Date(o.date + "T00:00:00"),
+        value: parseFredValue(o.value)
+      }))
+      .filter(o => o.value !== null)
+      .sort((a, b) => a.date - b.date);
+
+    if (obs.length === 0) throw new Error("No observations returned (after filtering missing values).");
+    return obs;
+  }
+
+  function computeTableRows(obs) {
+    // We will compute:
+    // YoY: this month vs 12 months prior
+    // QoQ: avg(last 3 months) vs avg(prior 3 months)
+    //
+    // For a given month index i:
+    //   yoy compares obs[i] to obs[i-12]
+    //   qoq compares mean(i,i-1,i-2) to mean(i-3,i-4,i-5)
+
+    const rows = obs.map((o, i) => {
+      const yoy = (i >= 12) ? pctChange(o.value, obs[i - 12].value) : null;
+
+      const currQ = (i >= 2) ? mean([obs[i].value, obs[i - 1].value, obs[i - 2].value]) : null;
+      const prevQ = (i >= 5) ? mean([obs[i - 3].value, obs[i - 4].value, obs[i - 5].value]) : null;
+      const qoq = (currQ !== null && prevQ !== null) ? pctChange(currQ, prevQ) : null;
+
+      return {
+        date: o.date,
+        value: o.value,
+        yoy,
+        qoq
+      };
+    });
+
+    // Most recent 18 months
+    return rows.slice(-18).reverse(); // newest first
+  }
+
+  function sliceLast20Years(obs) {
+    const latest = obs[obs.length - 1].date;
+    const start = addYears(latest, -20);
+
+    return obs.filter(o => o.date >= start);
+  }
+
+  // ==========================
+  // 4) Render chart + table
+  // ==========================
+  function renderChart(obs20y) {
+    const labels = obs20y.map(o => fmtMonth.format(o.date));
+    const values = obs20y.map(o => o.value);
+
+    const ctx = document.getElementById("chart");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "HSN1F (Thousands, SAAR)",
+          data: values,
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12 } },
+          y: {
+            ticks: {
+              callback: (v) => fmtNumber.format(v)
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderTable(rows18) {
+    const tbody = document.getElementById("tbody");
+    tbody.innerHTML = "";
+
+    // Display newest first
+    for (const r of rows18) {
+      const tr = document.createElement("tr");
+
+      const monthTd = document.createElement("td");
+      monthTd.textContent = fmtMonth.format(r.date);
+
+      const valTd = document.createElement("td");
+      valTd.textContent = fmtNumber.format(r.value);
+
+      const yoyTd = document.createElement("td");
+      yoyTd.textContent = (r.yoy === null) ? "—" : `${fmtPct.format(r.yoy)}%`;
+
+      const qoqTd = document.createElement("td");
+      qoqTd.textContent = (r.qoq === null) ? "—" : `${fmtPct.format(r.qoq)}%`;
+
+      tr.appendChild(monthTd);
+      tr.appendChild(valTd);
+      tr.appendChild(yoyTd);
+      tr.appendChild(qoqTd);
+
+      tbody.appendChild(tr);
+    }
+  }
+
+  // ==========================
+  // 5) Main
+  // ==========================
+  (async function main() {
+    const status = document.getElementById("status");
+    const err = document.getElementById("err");
+
+    try {
+      status.textContent = "Fetching HSN1F from FRED…";
+      err.textContent = "";
+
+      const obs = await fetchObservations();
+      const latest = obs[obs.length - 1].date;
+
+      status.innerHTML = `<span class="ok">Loaded</span> ${obs.length} observations. Latest: ${fmtMonth.format(latest)}.`;
+
+      const obs20y = sliceLast20Years(obs);
+      renderChart(obs20y);
+
+      const rows18 = computeTableRows(obs);
+      renderTable(rows18);
+
+    } catch (e) {
+      status.textContent = "Could not load data.";
+      err.textContent = String(e && e.message ? e.message : e);
+      console.error(e);
+    }
+  })();
+</script>
+
+</body>
+</html>
