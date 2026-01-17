@@ -25,10 +25,18 @@
 </head>
 
 <body>
-  <h1>New One Family Houses Sold (HSN1F)</h1>
-  <p class="sub">
-    Source: FRED (U.S. Census Bureau / HUD). Units: Thousands, Seasonally Adjusted Annual Rate.
-  </p>
+  <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
+  <h1 style="margin:0;">HousingDataCentral</h1>
+
+  <label for="seriesSelect" style="color:#555;">
+    Series:
+    <select id="seriesSelect" style="margin-left:6px; padding:6px 8px;"></select>
+  </label>
+</div>
+
+<p class="sub" id="seriesMeta">
+  Loading series...
+</p>
 
   <div class="card">
     <div id="status">Loading data...</div>
@@ -62,15 +70,43 @@
   </div>
 
 <script>
-  // 1) CONFIG: paste your key
-  const FRED_API_KEY = ""; //Not used anymore
-  const SERIES_ID = "HSN1F";
+  // =========================================================
+  // CONFIG
+  // =========================================================
   const FRED_OBS_URL = "https://fred-proxy.patrick-grow.workers.dev";
 
-  // 2) Helpers
-  const fmtNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const fmtPct = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  const SERIES_LIST = [
+    { id: "HSN1F",        name: "New Home Sales (SAAR)" },
+    { id: "MSACSR",       name: "Months of Inventory (New Homes)" },
+    { id: "MSPNHSUS",     name: "Median Sales Price (New Homes)" },
+    { id: "MSPUS",        name: "Median Sales Price (All Homes)" },
+    { id: "HOUST",        name: "Housing Starts (Total)" },
+    { id: "HOUST1F",      name: "Housing Starts (Single-Family)" },
+    { id: "PERMIT1",      name: "Permits (Single-Family)" },
+    { id: "MORTGAGE30US", name: "30-Year Mortgage Rate (monthly avg)" }
+  ];
+
+  const RECESSION_SERIES_ID = "USREC"; // NBER recession indicator (0/1, monthly)
+
+  // =========================================================
+  // Helpers
+  // =========================================================
+  const fmtNumber0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
   const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+
+  // Per-series formatting (keeps table “obviously correct”)
+  function formatValue(seriesId, v) {
+    if (v === null || v === undefined) return "-";
+    if (seriesId === "MORTGAGE30US") return fmtPct1.format(v) + "%";
+    if (seriesId === "MSPNHSUS" || seriesId === "MSPUS") return "$" + fmtNumber0.format(v);
+    return fmtNumber0.format(v);
+  }
+
+  function formatPct(v) {
+    if (v === null || v === undefined) return "-";
+    return fmtPct1.format(v) + "%";
+  }
 
   function parseFredValue(v) {
     if (v === "." || v === null || v === undefined) return null;
@@ -81,8 +117,7 @@
   function mean(nums) {
     const clean = nums.filter(n => n !== null && n !== undefined);
     if (clean.length === 0) return null;
-    const s = clean.reduce((a, b) => a + b, 0);
-    return s / clean.length;
+    return clean.reduce((a, b) => a + b, 0) / clean.length;
   }
 
   function pctChange(curr, prev) {
@@ -97,45 +132,35 @@
     return d;
   }
 
-  // 3) Fetch + transform
-  async function fetchObservations() {
-    const url = new URL(FRED_OBS_URL);
-    url.searchParams.set("series_id", SERIES_ID);
-    //url.searchParams.set("api_key", FRED_API_KEY);
-    url.searchParams.set("file_type", "json");
-
-    const resp = await fetch(url.toString());
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error("FRED request failed (" + resp.status + "). Response:\n" + txt);
-    }
-
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.observations)) {
-      throw new Error("Unexpected FRED response shape.");
-    }
-
-    const obs = data.observations
-      .map(o => ({ date: new Date(o.date + "T00:00:00"), value: parseFredValue(o.value) }))
-      .filter(o => o.value !== null)
-      .sort((a, b) => a.date - b.date);
-
-    if (obs.length === 0) throw new Error("No observations returned (after filtering missing values).");
-    return obs;
+  function monthKey(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return y + "-" + m; // e.g., 2024-07
   }
 
-  function computeTableRows(obs) {
-    const rows = obs.map((o, i) => {
-      const yoy = (i >= 12) ? pctChange(o.value, obs[i - 12].value) : null;
+  // Convert any frequency (weekly included) into monthly observations by averaging within each month.
+  function toMonthly(obs) {
+    const buckets = new Map(); // key -> { date: firstOfMonth, values: [] }
 
-      const currQ = (i >= 2) ? mean([obs[i].value, obs[i - 1].value, obs[i - 2].value]) : null;
-      const prevQ = (i >= 5) ? mean([obs[i - 3].value, obs[i - 4].value, obs[i - 5].value]) : null;
-      const qoq = (currQ !== null && prevQ !== null) ? pctChange(currQ, prevQ) : null;
+    for (const o of obs) {
+      const key = monthKey(o.date);
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          date: new Date(o.date.getFullYear(), o.date.getMonth(), 1),
+          values: []
+        });
+      }
+      buckets.get(key).values.push(o.value);
+    }
 
-      return { date: o.date, value: o.value, yoy: yoy, qoq: qoq };
-    });
+    const monthly = [];
+    for (const [, b] of buckets) {
+      const avg = mean(b.values);
+      if (avg !== null) monthly.push({ date: b.date, value: avg });
+    }
 
-    return rows.slice(-18).reverse(); // newest first
+    monthly.sort((a, b) => a.date - b.date);
+    return monthly;
   }
 
   function sliceLast20Years(obs) {
@@ -144,36 +169,54 @@
     return obs.filter(o => o.date >= start);
   }
 
-  // 4) Render chart + table
-  function renderChart(obs20y) {
-    const labels = obs20y.map(o => fmtMonth.format(o.date));
-    const values = obs20y.map(o => o.value);
+  // =========================================================
+  // Fetch (via your Cloudflare Worker)
+  // =========================================================
+  async function fetchSeriesMonthly(seriesId) {
+    const url = new URL(FRED_OBS_URL);
+    url.searchParams.set("series_id", seriesId);
+    url.searchParams.set("file_type", "json");
 
-    const ctx = document.getElementById("chart");
-    new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: labels,
-        datasets: [{
-          label: "HSN1F (Thousands, SAAR)",
-          data: values,
-          tension: 0.15,
-          pointRadius: 0,
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: true } },
-        scales: {
-          x: { ticks: { maxTicksLimit: 12 } },
-          y: { ticks: { callback: (v) => fmtNumber.format(v) } }
-        }
-      }
-    });
+    const resp = await fetch(url.toString());
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error("Request failed (" + resp.status + ")\n" + txt);
+    }
+
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.observations)) {
+      throw new Error("Unexpected response shape for " + seriesId);
+    }
+
+    const obs = data.observations
+      .map(o => ({ date: new Date(o.date + "T00:00:00"), value: parseFredValue(o.value) }))
+      .filter(o => o.value !== null)
+      .sort((a, b) => a.date - b.date);
+
+    if (obs.length === 0) throw new Error("No observations returned for " + seriesId);
+
+    return toMonthly(obs);
   }
 
-  function renderTable(rows18) {
+  // =========================================================
+  // Table calcs (monthly)
+  // =========================================================
+  function computeTableRows(obsMonthly) {
+    const rows = obsMonthly.map((o, i) => {
+      const yoy = (i >= 12) ? pctChange(o.value, obsMonthly[i - 12].value) : null;
+
+      // QoQ definition: avg(last 3 months) vs avg(prior 3 months)
+      const currQ = (i >= 2) ? mean([obsMonthly[i].value, obsMonthly[i - 1].value, obsMonthly[i - 2].value]) : null;
+      const prevQ = (i >= 5) ? mean([obsMonthly[i - 3].value, obsMonthly[i - 4].value, obsMonthly[i - 5].value]) : null;
+      const qoq = (currQ !== null && prevQ !== null) ? pctChange(currQ, prevQ) : null;
+
+      return { date: o.date, value: o.value, yoy, qoq };
+    });
+
+    return rows.slice(-18).reverse(); // newest first
+  }
+
+  function renderTable(seriesId, rows18) {
     const tbody = document.getElementById("tbody");
     tbody.innerHTML = "";
 
@@ -184,13 +227,13 @@
       monthTd.textContent = fmtMonth.format(r.date);
 
       const valTd = document.createElement("td");
-      valTd.textContent = fmtNumber.format(r.value);
+      valTd.textContent = formatValue(seriesId, r.value);
 
       const yoyTd = document.createElement("td");
-      yoyTd.textContent = (r.yoy === null) ? "-" : (fmtPct.format(r.yoy) + "%");
+      yoyTd.textContent = formatPct(r.yoy);
 
       const qoqTd = document.createElement("td");
-      qoqTd.textContent = (r.qoq === null) ? "-" : (fmtPct.format(r.qoq) + "%");
+      qoqTd.textContent = formatPct(r.qoq);
 
       tr.appendChild(monthTd);
       tr.appendChild(valTd);
@@ -201,28 +244,158 @@
     }
   }
 
-  // 5) Main
-  (async function main() {
+  // =========================================================
+  // Recession shading (USREC)
+  // =========================================================
+  let chart; // Chart.js instance
+
+  const recessionShadingPlugin = {
+    id: "recessionShading",
+    beforeDatasetsDraw(chartInstance, args, opts) {
+      const { ctx, chartArea, scales } = chartInstance;
+      if (!chartArea) return;
+
+      const xScale = scales.x;
+      const bands = (opts && opts.bands) ? opts.bands : [];
+      if (!bands.length) return;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.08)";
+
+      for (const b of bands) {
+        const x0 = xScale.getPixelForValue(b.startLabel);
+        const x1 = xScale.getPixelForValue(b.endLabel);
+        const left = Math.min(x0, x1);
+        const width = Math.abs(x1 - x0);
+        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
+      }
+      ctx.restore();
+    }
+  };
+
+  function buildRecessionBands(usrec20y, labels20y) {
+    const recByLabel = new Map(usrec20y.map(o => [fmtMonth.format(o.date), o.value]));
+    const bands = [];
+
+    let inRec = false;
+    let startLabel = null;
+
+    for (let i = 0; i < labels20y.length; i++) {
+      const lab = labels20y[i];
+      const v = recByLabel.get(lab);
+      const isRec = (v === 1);
+
+      if (isRec && !inRec) {
+        inRec = true;
+        startLabel = lab;
+      }
+
+      if (!isRec && inRec) {
+        inRec = false;
+        const endLabel = labels20y[i - 1] || startLabel;
+        bands.push({ startLabel, endLabel });
+        startLabel = null;
+      }
+    }
+
+    if (inRec && startLabel) {
+      bands.push({ startLabel, endLabel: labels20y[labels20y.length - 1] });
+    }
+
+    return bands;
+  }
+
+  function renderChart(seriesName, obs20y, usrec20y) {
+    const labels = obs20y.map(o => fmtMonth.format(o.date));
+    const values = obs20y.map(o => o.value);
+
+    const bands = buildRecessionBands(usrec20y, labels);
+
+    const ctx = document.getElementById("chart");
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: seriesName,
+          data: values,
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true },
+          recessionShading: { bands }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12 } },
+          y: { ticks: { callback: (v) => fmtNumber0.format(v) } }
+        }
+      },
+      plugins: [recessionShadingPlugin]
+    });
+  }
+
+  // =========================================================
+  // UI + Main
+  // =========================================================
+  function populateDropdown() {
+    const sel = document.getElementById("seriesSelect");
+    sel.innerHTML = "";
+    for (const s of SERIES_LIST) {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    }
+  }
+
+  async function loadAndRender(seriesId) {
     const status = document.getElementById("status");
     const err = document.getElementById("err");
+    const meta = document.getElementById("seriesMeta");
+
+    const selected = SERIES_LIST.find(s => s.id === seriesId) || { id: seriesId, name: seriesId };
 
     try {
-      status.textContent = "Fetching HSN1F from FRED...";
+      status.textContent = "Fetching " + selected.id + "...";
       err.textContent = "";
+      meta.textContent = "Selected: " + selected.name;
 
-      const obs = await fetchObservations();
-      const latest = obs[obs.length - 1].date;
+      const [obsMonthly, usrecMonthly] = await Promise.all([
+        fetchSeriesMonthly(seriesId),
+        fetchSeriesMonthly(RECESSION_SERIES_ID)
+      ]);
 
-      status.innerHTML = "<span class='ok'>Loaded</span> " + obs.length + " observations. Latest: " + fmtMonth.format(latest) + ".";
+      const latest = obsMonthly[obsMonthly.length - 1].date;
+      status.innerHTML = "<span class='ok'>Loaded</span> " + obsMonthly.length + " monthly observations. Latest: " + fmtMonth.format(latest) + ".";
 
-      renderChart(sliceLast20Years(obs));
-      renderTable(computeTableRows(obs));
+      const obs20y = sliceLast20Years(obsMonthly);
+      const usrec20y = sliceLast20Years(usrecMonthly);
+
+      renderChart(selected.name, obs20y, usrec20y);
+      renderTable(seriesId, computeTableRows(obsMonthly));
 
     } catch (e) {
       status.textContent = "Could not load data.";
       err.textContent = String(e && e.message ? e.message : e);
       console.error(e);
     }
+  }
+
+  (function init() {
+    populateDropdown();
+
+    const sel = document.getElementById("seriesSelect");
+    sel.addEventListener("change", () => loadAndRender(sel.value));
+
+    // initial load = first item
+    loadAndRender(sel.value || SERIES_LIST[0].id);
   })();
 </script>
 
