@@ -63,9 +63,9 @@
 
 <script>
   // 1) CONFIG: paste your key
-  const FRED_API_KEY = "6c693945e981a20a3015ea8fd6700128";
+  const FRED_API_KEY = ""; //Not used anymore
   const SERIES_ID = "HSN1F";
-  const FRED_OBS_URL = "https://api.stlouisfed.org/fred/series/observations";
+  const FRED_OBS_URL = "https://fred-proxy.patrick-grow.workers.dev";
 
   // 2) Helpers
   const fmtNumber = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -99,13 +99,9 @@
 
   // 3) Fetch + transform
   async function fetchObservations() {
-    if (!FRED_API_KEY || FRED_API_KEY.indexOf("PASTE_") >= 0) {
-      throw new Error("Paste your FRED API key into FRED_API_KEY near the top of the file (keep the quotes).");
-    }
-
     const url = new URL(FRED_OBS_URL);
     url.searchParams.set("series_id", SERIES_ID);
-    url.searchParams.set("api_key", FRED_API_KEY);
+    //url.searchParams.set("api_key", FRED_API_KEY);
     url.searchParams.set("file_type", "json");
 
     const resp = await fetch(url.toString());
