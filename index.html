@@ -25,379 +25,327 @@
 </head>
 
 <body>
-  <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
-  <h1 style="margin:0;">HousingDataCentral</h1>
+  <h1>Housing Affordability Monitor</h1>
+  <p class="sub">
+    Median household income as a % of median existing-home price (monthly).
+    Bars > 35% are red; ≤ 35% are blue.
+  </p>
 
-  <label for="seriesSelect" style="color:#555;">
-    Series:
-    <select id="seriesSelect" style="margin-left:6px; padding:6px 8px;"></select>
-  </label>
-</div>
-
-<p class="sub" id="seriesMeta">
-  Loading series...
-</p>
-
-  <div class="card">
-    <div id="status">Loading data...</div>
-    <div id="err" class="error"></div>
-  </div>
-
-  <div class="card">
-    <h2 style="margin-top:0;">Last 20 years (line chart)</h2>
-    <canvas id="chart" height="110"></canvas>
-    <div class="note">Chart shows the last 20 years ending at the latest available observation.</div>
-  </div>
-
-  <div class="card">
-    <h2 style="margin-top:0;">Most recent 18 months (table)</h2>
-    <div style="overflow:auto; max-height: 520px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Month reported</th>
-            <th>Raw data number</th>
-            <th>% change y/y</th>
-            <th>% change q/q</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+  <div class="card" style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+    <div style="min-width:260px;">
+      <div style="font-size:13px; color:#666;">Latest affordability</div>
+      <div id="kpiValue" style="font-size:34px; font-weight:700; line-height:1.05;">--</div>
+      <div id="kpiMeta" style="font-size:13px; color:#666; margin-top:4px;">--</div>
     </div>
+
+    <div style="flex:1; min-width:260px;">
+      <div id="status">Loading data...</div>
+      <div id="err" class="error"></div>
+
+      <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <div style="color:#555; font-size:13px;">View:</div>
+        <button id="btn10" class="btn">Last 10 years</button>
+        <button id="btn20" class="btn btnActive">Last 20 years</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Affordability over time</h2>
+    <canvas id="chart" height="120"></canvas>
     <div class="note">
-      q/q definition: average of last 3 months vs average of prior 3 months (percent change).
+      Income: MEHOINUSA672N (annual, forward-filled). Price: HOSMEDUSM052N (monthly existing-home median price).
+      35% reference line shown.
     </div>
   </div>
 
-<script>
-  // =========================================================
-  // CONFIG
-  // =========================================================
-  const FRED_OBS_URL = "https://fred-proxy.patrick-grow.workers.dev";
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.35; }
+    h1 { margin: 0 0 6px; }
+    .sub { color: #555; margin: 0 0 18px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 14px 0; }
+    .note { color: #666; font-size: 13px; margin-top: 8px; }
+    .error { color: #b00020; white-space: pre-wrap; margin-top: 6px; }
+    .ok { color: #1a7f37; }
 
-  const SERIES_LIST = [
-    { id: "HSN1F",        name: "New Home Sales (SAAR)" },
-    { id: "MSACSR",       name: "Months of Inventory (New Homes)" },
-    { id: "MSPNHSUS",     name: "Median Sales Price (New Homes)" },
-    { id: "MSPUS",        name: "Median Sales Price (All Homes)" },
-    { id: "HOUST",        name: "Housing Starts (Total)" },
-    { id: "HOUST1F",      name: "Housing Starts (Single-Family)" },
-    { id: "PERMIT1",      name: "Permits (Single-Family)" },
-    { id: "MORTGAGE30US", name: "30-Year Mortgage Rate (monthly avg)" }
-  ];
+    .btn {
+      border: 1px solid #ccc;
+      background: #fff;
+      padding: 7px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btnActive {
+      border-color: #555;
+      font-weight: 700;
+    }
+  </style>
 
-  const RECESSION_SERIES_ID = "USREC"; // NBER recession indicator (0/1, monthly)
+  <script>
+    // ==========================
+    // CONFIG
+    // ==========================
+    const FRED_PROXY_URL = "https://fred-proxy.patrick-grow.workers.dev";
 
-  // =========================================================
-  // Helpers
-  // =========================================================
-  const fmtNumber0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-  const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+    const INCOME_SERIES = "MEHOINUSA672N";   // annual
+    const PRICE_SERIES  = "HOSMEDUSM052N";   // monthly (existing-home median price)
+    const THRESHOLD = 35;                    // percent
 
-  // Per-series formatting (keeps table “obviously correct”)
-  function formatValue(seriesId, v) {
-    if (v === null || v === undefined) return "-";
-    if (seriesId === "MORTGAGE30US") return fmtPct1.format(v) + "%";
-    if (seriesId === "MSPNHSUS" || seriesId === "MSPUS") return "$" + fmtNumber0.format(v);
-    return fmtNumber0.format(v);
-  }
+    let chart;
+    let affordabilityAll = [];               // full monthly history (as available)
+    let currentWindowYears = 20;             // toggle state
 
-  function formatPct(v) {
-    if (v === null || v === undefined) return "-";
-    return fmtPct1.format(v) + "%";
-  }
+    // ==========================
+    // Helpers
+    // ==========================
+    const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+    const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
 
-  function parseFredValue(v) {
-    if (v === "." || v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function mean(nums) {
-    const clean = nums.filter(n => n !== null && n !== undefined);
-    if (clean.length === 0) return null;
-    return clean.reduce((a, b) => a + b, 0) / clean.length;
-  }
-
-  function pctChange(curr, prev) {
-    if (curr === null || prev === null) return null;
-    if (prev === 0) return null;
-    return (curr / prev - 1) * 100;
-  }
-
-  function addYears(dateObj, years) {
-    const d = new Date(dateObj);
-    d.setFullYear(d.getFullYear() + years);
-    return d;
-  }
-
-  function monthKey(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    return y + "-" + m; // e.g., 2024-07
-  }
-
-  // Convert any frequency (weekly included) into monthly observations by averaging within each month.
-  function toMonthly(obs) {
-    const buckets = new Map(); // key -> { date: firstOfMonth, values: [] }
-
-    for (const o of obs) {
-      const key = monthKey(o.date);
-      if (!buckets.has(key)) {
-        buckets.set(key, {
-          date: new Date(o.date.getFullYear(), o.date.getMonth(), 1),
-          values: []
-        });
-      }
-      buckets.get(key).values.push(o.value);
+    function parseFredValue(v) {
+      if (v === "." || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
     }
 
-    const monthly = [];
-    for (const [, b] of buckets) {
-      const avg = mean(b.values);
-      if (avg !== null) monthly.push({ date: b.date, value: avg });
-    }
+    async function fetchSeries(seriesId) {
+      const url = new URL(FRED_PROXY_URL);
+      url.searchParams.set("series_id", seriesId);
+      url.searchParams.set("file_type", "json");
 
-    monthly.sort((a, b) => a.date - b.date);
-    return monthly;
-  }
-
-  function sliceLast20Years(obs) {
-    const latest = obs[obs.length - 1].date;
-    const start = addYears(latest, -20);
-    return obs.filter(o => o.date >= start);
-  }
-
-  // =========================================================
-  // Fetch (via your Cloudflare Worker)
-  // =========================================================
-  async function fetchSeriesMonthly(seriesId) {
-    const url = new URL(FRED_OBS_URL);
-    url.searchParams.set("series_id", seriesId);
-    url.searchParams.set("file_type", "json");
-
-    const resp = await fetch(url.toString());
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error("Request failed (" + resp.status + ")\n" + txt);
-    }
-
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.observations)) {
-      throw new Error("Unexpected response shape for " + seriesId);
-    }
-
-    const obs = data.observations
-      .map(o => ({ date: new Date(o.date + "T00:00:00"), value: parseFredValue(o.value) }))
-      .filter(o => o.value !== null)
-      .sort((a, b) => a.date - b.date);
-
-    if (obs.length === 0) throw new Error("No observations returned for " + seriesId);
-
-    return toMonthly(obs);
-  }
-
-  // =========================================================
-  // Table calcs (monthly)
-  // =========================================================
-  function computeTableRows(obsMonthly) {
-    const rows = obsMonthly.map((o, i) => {
-      const yoy = (i >= 12) ? pctChange(o.value, obsMonthly[i - 12].value) : null;
-
-      // QoQ definition: avg(last 3 months) vs avg(prior 3 months)
-      const currQ = (i >= 2) ? mean([obsMonthly[i].value, obsMonthly[i - 1].value, obsMonthly[i - 2].value]) : null;
-      const prevQ = (i >= 5) ? mean([obsMonthly[i - 3].value, obsMonthly[i - 4].value, obsMonthly[i - 5].value]) : null;
-      const qoq = (currQ !== null && prevQ !== null) ? pctChange(currQ, prevQ) : null;
-
-      return { date: o.date, value: o.value, yoy, qoq };
-    });
-
-    return rows.slice(-18).reverse(); // newest first
-  }
-
-  function renderTable(seriesId, rows18) {
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = "";
-
-    for (const r of rows18) {
-      const tr = document.createElement("tr");
-
-      const monthTd = document.createElement("td");
-      monthTd.textContent = fmtMonth.format(r.date);
-
-      const valTd = document.createElement("td");
-      valTd.textContent = formatValue(seriesId, r.value);
-
-      const yoyTd = document.createElement("td");
-      yoyTd.textContent = formatPct(r.yoy);
-
-      const qoqTd = document.createElement("td");
-      qoqTd.textContent = formatPct(r.qoq);
-
-      tr.appendChild(monthTd);
-      tr.appendChild(valTd);
-      tr.appendChild(yoyTd);
-      tr.appendChild(qoqTd);
-
-      tbody.appendChild(tr);
-    }
-  }
-
-  // =========================================================
-  // Recession shading (USREC)
-  // =========================================================
-  let chart; // Chart.js instance
-
-  const recessionShadingPlugin = {
-    id: "recessionShading",
-    beforeDatasetsDraw(chartInstance, args, opts) {
-      const { ctx, chartArea, scales } = chartInstance;
-      if (!chartArea) return;
-
-      const xScale = scales.x;
-      const bands = (opts && opts.bands) ? opts.bands : [];
-      if (!bands.length) return;
-
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.08)";
-
-      for (const b of bands) {
-        const x0 = xScale.getPixelForValue(b.startLabel);
-        const x1 = xScale.getPixelForValue(b.endLabel);
-        const left = Math.min(x0, x1);
-        const width = Math.abs(x1 - x0);
-        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
-      }
-      ctx.restore();
-    }
-  };
-
-  function buildRecessionBands(usrec20y, labels20y) {
-    const recByLabel = new Map(usrec20y.map(o => [fmtMonth.format(o.date), o.value]));
-    const bands = [];
-
-    let inRec = false;
-    let startLabel = null;
-
-    for (let i = 0; i < labels20y.length; i++) {
-      const lab = labels20y[i];
-      const v = recByLabel.get(lab);
-      const isRec = (v === 1);
-
-      if (isRec && !inRec) {
-        inRec = true;
-        startLabel = lab;
+      const resp = await fetch(url.toString());
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error("Request failed (" + resp.status + ")\n" + txt);
       }
 
-      if (!isRec && inRec) {
-        inRec = false;
-        const endLabel = labels20y[i - 1] || startLabel;
-        bands.push({ startLabel, endLabel });
-        startLabel = null;
+      const data = await resp.json();
+      if (!data || !Array.isArray(data.observations)) {
+        throw new Error("Unexpected response shape for " + seriesId);
       }
+
+      return data.observations
+        .map(o => ({
+          date: new Date(o.date + "T00:00:00"),
+          value: parseFredValue(o.value)
+        }))
+        .filter(o => o.value !== null)
+        .sort((a, b) => a.date - b.date);
     }
 
-    if (inRec && startLabel) {
-      bands.push({ startLabel, endLabel: labels20y[labels20y.length - 1] });
+    function addYears(d, years) {
+      const x = new Date(d);
+      x.setFullYear(x.getFullYear() + years);
+      return x;
     }
 
-    return bands;
-  }
+    function monthStart(d) {
+      return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
 
-  function renderChart(seriesName, obs20y, usrec20y) {
-    const labels = obs20y.map(o => fmtMonth.format(o.date));
-    const values = obs20y.map(o => o.value);
+    function sliceLastYears(data, yearsBack) {
+      if (!data.length) return [];
+      const latest = data[data.length - 1].date;
+      const start = monthStart(addYears(latest, -yearsBack));
+      return data.filter(o => o.date >= start);
+    }
 
-    const bands = buildRecessionBands(usrec20y, labels);
+    // Build the monthly timeline from the monthly price series
+    function toMonthlyTimeline(priceObsRaw) {
+      return priceObsRaw.map(o => ({ date: monthStart(o.date), value: o.value }));
+    }
 
-    const ctx = document.getElementById("chart");
-    if (chart) chart.destroy();
+    // Forward-fill annual income to the monthly timeline
+    function forwardFillIncomeToMonths(incomeObs, monthlyDates) {
+      const incomeByYear = new Map(incomeObs.map(o => [o.date.getFullYear(), o.value]));
+      const years = Array.from(incomeByYear.keys()).sort((a, b) => a - b);
 
-    chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: seriesName,
-          data: values,
-          tension: 0.15,
-          pointRadius: 0,
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { display: true },
-          recessionShading: { bands }
-        },
-        scales: {
-          x: { ticks: { maxTicksLimit: 12 } },
-          y: { ticks: { callback: (v) => fmtNumber0.format(v) } }
+      function latestIncomeForYear(y) {
+        for (let i = years.length - 1; i >= 0; i--) {
+          if (years[i] <= y) return incomeByYear.get(years[i]);
         }
-      },
-      plugins: [recessionShadingPlugin]
-    });
-  }
+        return null;
+      }
 
-  // =========================================================
-  // UI + Main
-  // =========================================================
-  function populateDropdown() {
-    const sel = document.getElementById("seriesSelect");
-    sel.innerHTML = "";
-    for (const s of SERIES_LIST) {
-      const opt = document.createElement("option");
-      opt.value = s.id;
-      opt.textContent = s.name;
-      sel.appendChild(opt);
+      return monthlyDates.map(d => ({
+        date: d,
+        value: latestIncomeForYear(d.getFullYear())
+      }));
     }
-  }
 
-  async function loadAndRender(seriesId) {
-    const status = document.getElementById("status");
-    const err = document.getElementById("err");
-    const meta = document.getElementById("seriesMeta");
+    function buildAffordability(incomeMonthly, priceMonthly) {
+      const priceByTime = new Map(priceMonthly.map(p => [p.date.getTime(), p.value]));
+      const out = [];
 
-    const selected = SERIES_LIST.find(s => s.id === seriesId) || { id: seriesId, name: seriesId };
+      for (const inc of incomeMonthly) {
+        const p = priceByTime.get(inc.date.getTime());
+        if (inc.value == null || p == null) continue;
+        out.push({ date: inc.date, ratio: (inc.value / p) * 100 });
+      }
 
-    try {
-      status.textContent = "Fetching " + selected.id + "...";
-      err.textContent = "";
-      meta.textContent = "Selected: " + selected.name;
-
-      const [obsMonthly, usrecMonthly] = await Promise.all([
-        fetchSeriesMonthly(seriesId),
-        fetchSeriesMonthly(RECESSION_SERIES_ID)
-      ]);
-
-      const latest = obsMonthly[obsMonthly.length - 1].date;
-      status.innerHTML = "<span class='ok'>Loaded</span> " + obsMonthly.length + " monthly observations. Latest: " + fmtMonth.format(latest) + ".";
-
-      const obs20y = sliceLast20Years(obsMonthly);
-      const usrec20y = sliceLast20Years(usrecMonthly);
-
-      renderChart(selected.name, obs20y, usrec20y);
-      renderTable(seriesId, computeTableRows(obsMonthly));
-
-    } catch (e) {
-      status.textContent = "Could not load data.";
-      err.textContent = String(e && e.message ? e.message : e);
-      console.error(e);
+      out.sort((a, b) => a.date - b.date);
+      return out;
     }
-  }
 
-  (function init() {
-    populateDropdown();
+    // ==========================
+    // KPI tile
+    // ==========================
+    function renderKpi(latestPoint) {
+      const kpiValue = document.getElementById("kpiValue");
+      const kpiMeta = document.getElementById("kpiMeta");
 
-    const sel = document.getElementById("seriesSelect");
-    sel.addEventListener("change", () => loadAndRender(sel.value));
+      const v = latestPoint.ratio;
+      const above = v > THRESHOLD;
 
-    // initial load = first item
-    loadAndRender(sel.value || SERIES_LIST[0].id);
-  })();
-</script>
+      kpiValue.textContent = fmtPct1.format(v) + "%";
+      kpiValue.style.color = above ? "#b00020" : "#1a7f37";
 
+      kpiMeta.textContent =
+        fmtMonth.format(latestPoint.date) +
+        " • " + (above ? "Above" : "At/Below") + " 35% threshold";
+    }
+
+    // ==========================
+    // 35% reference line plugin
+    // ==========================
+    const thresholdLinePlugin = {
+      id: "thresholdLine",
+      afterDraw(chartInstance, args, opts) {
+        const y = (opts && typeof opts.yValue === "number") ? opts.yValue : null;
+        if (y === null) return;
+
+        const { ctx, chartArea, scales } = chartInstance;
+        if (!chartArea) return;
+
+        const yScale = scales.y;
+        const yPix = yScale.getPixelForValue(y);
+
+        if (yPix < chartArea.top || yPix > chartArea.bottom) return;
+
+        ctx.save();
+        ctx.strokeStyle = "rgba(0,0,0,0.45)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+
+        ctx.beginPath();
+        ctx.moveTo(chartArea.left, yPix);
+        ctx.lineTo(chartArea.right, yPix);
+        ctx.stroke();
+
+        // Label
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(0,0,0,0.65)";
+        ctx.font = "12px Arial";
+        ctx.fillText("35% threshold", chartArea.left + 6, yPix - 6);
+
+        ctx.restore();
+      }
+    };
+
+    // ==========================
+    // Chart render
+    // ==========================
+    function renderChart(series) {
+      const labels = series.map(d => fmtMonth.format(d.date));
+      const values = series.map(d => d.ratio);
+      const colors = series.map(d => (d.ratio > THRESHOLD ? "#d32f2f" : "#1976d2"));
+
+      const ctx = document.getElementById("chart");
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [{
+            label: "Income / Existing-Home Price (%)",
+            data: values,
+            backgroundColor: colors
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: true },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => " " + fmtPct1.format(ctx.raw) + "%"
+              }
+            },
+            thresholdLine: { yValue: THRESHOLD }
+          },
+          scales: {
+            x: { ticks: { maxTicksLimit: 12 } },
+            y: {
+              beginAtZero: true,
+              ticks: { callback: (v) => fmtPct1.format(v) + "%" }
+            }
+          }
+        },
+        plugins: [thresholdLinePlugin]
+      });
+    }
+
+    // ==========================
+    // Toggle handling
+    // ==========================
+    function setWindowYears(years) {
+      currentWindowYears = years;
+
+      document.getElementById("btn10").classList.toggle("btnActive", years === 10);
+      document.getElementById("btn20").classList.toggle("btnActive", years === 20);
+
+      const sliced = sliceLastYears(affordabilityAll, currentWindowYears);
+      renderChart(sliced);
+    }
+
+    // ==========================
+    // Main
+    // ==========================
+    (async function main() {
+      const status = document.getElementById("status");
+      const err = document.getElementById("err");
+
+      try {
+        status.textContent = "Fetching FRED series...";
+        err.textContent = "";
+
+        const [incomeObs, priceObsRaw] = await Promise.all([
+          fetchSeries(INCOME_SERIES),
+          fetchSeries(PRICE_SERIES)
+        ]);
+
+        const priceMonthly = toMonthlyTimeline(priceObsRaw);
+        if (priceMonthly.length === 0) throw new Error("Price series returned no monthly observations.");
+
+        const monthlyDates = priceMonthly.map(p => p.date);
+        const incomeMonthly = forwardFillIncomeToMonths(incomeObs, monthlyDates);
+
+        affordabilityAll = buildAffordability(incomeMonthly, priceMonthly);
+        if (affordabilityAll.length === 0) throw new Error("No overlapping data points after alignment.");
+
+        const latest = affordabilityAll[affordabilityAll.length - 1];
+
+        status.innerHTML =
+          "<span class='ok'>Loaded</span> " +
+          affordabilityAll.length + " months. Latest: " +
+          fmtMonth.format(latest.date) + " = " + fmtPct1.format(latest.ratio) + "%.";
+
+        renderKpi(latest);
+
+        // initial render = 20y
+        setWindowYears(20);
+
+        // wire up buttons
+        document.getElementById("btn10").addEventListener("click", () => setWindowYears(10));
+        document.getElementById("btn20").addEventListener("click", () => setWindowYears(20));
+
+      } catch (e) {
+        status.textContent = "Could not load data.";
+        err.textContent = String(e && e.message ? e.message : e);
+        console.error(e);
+      }
+    })();
+  </script>
 </body>
 </html>
