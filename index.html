@@ -155,8 +155,8 @@ async function fetchInsights() {
       bulletsEl.appendChild(li);
     });
 
-    const urls = (data.source_urls || []);
-    metaEl.textContent = urls.length ? ("Sources: " + urls.join(" • ")) : "";
+    metaEl.textContent = ""; // sources removed
+
 
   } catch (e) {
     status.textContent = "Could not load commentary.";
