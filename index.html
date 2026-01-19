@@ -132,6 +132,9 @@ const SERIES_PERMITS_SF = "PERMIT1";                // Single-family permits SAA
 const SERIES_USREC = "USREC";                       // NBER recession indicator :contentReference[oaicite:17]{index=17}
 
 const YEARS = 20;
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_PREFIX = "fredcache_v1:";
+
 
 /* =========================
    HELPERS
@@ -185,7 +188,53 @@ function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
 /* =========================
    FETCH (via your proxy)
 ========================= */
+function cacheKeyForSeries(seriesId) {
+  return CACHE_PREFIX + seriesId;
+}
+
+function readCache(seriesId) {
+  try {
+    const raw = localStorage.getItem(cacheKeyForSeries(seriesId));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const { savedAt, data } = parsed;
+    if (!savedAt || !data) return null;
+
+    // TTL check
+    if ((Date.now() - savedAt) > CACHE_TTL_MS) return null;
+
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(seriesId, data) {
+  try {
+    const payload = { savedAt: Date.now(), data };
+    localStorage.setItem(cacheKeyForSeries(seriesId), JSON.stringify(payload));
+  } catch {
+    // If localStorage is full or blocked, silently continue without caching
+  }
+}
+
 async function fetchSeries(seriesId) {
+  // 1) Try cache first
+  const cached = readCache(seriesId);
+  if (cached && Array.isArray(cached.observations)) {
+    const obsCached = cached.observations
+      .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+      .filter(o => o.value !== null)
+      .sort((a, b) => a.date - b.date);
+
+    if (obsCached.length) return obsCached;
+    // fall through to live fetch if cache is malformed
+  }
+
+  // 2) Live fetch
   const url = new URL(PROXY_BASE);
   url.searchParams.set("series_id", seriesId);
   url.searchParams.set("file_type", "json");
@@ -197,16 +246,21 @@ async function fetchSeries(seriesId) {
   }
 
   const data = await resp.json();
+
+  // 3) Save to cache (raw JSON) for next load
+  writeCache(seriesId, data);
+
   if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response shape.`);
 
   const obs = data.observations
     .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
     .filter(o => o.value !== null)
-    .sort((a,b)=>a.date-b.date);
+    .sort((a, b) => a.date - b.date);
 
   if (!obs.length) throw new Error(`${seriesId}: no observations after filtering.`);
   return obs;
 }
+
 
 /* Convert any frequency to monthly averages (e.g., weekly mortgage rate -> monthly) */
 function toMonthlyAverage(obs) {
