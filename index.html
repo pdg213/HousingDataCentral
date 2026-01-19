@@ -64,9 +64,11 @@
       </p>
 
       <div class="row" style="margin-bottom:10px;">
-        <label for="downPayment">Down payment ($)</label>
-        <input id="downPayment" type="number" min="0" step="1000" />
-        <span id="dpHint" class="small"></span>
+        <label for="downPaymentPct">Down payment</label>
+<input id="downPaymentPct" type="range" min="0" max="50" step="1" value="20" style="width:220px;" />
+<span id="dpPctLabel" class="pill">20%</span>
+<span id="dpHint" class="small" style="margin-left:6px;"></span>
+
       </div>
 
       <canvas id="chart1"></canvas>
@@ -483,22 +485,28 @@ let recessionRanges = [];
     const aligned1 = alignMonthly(price, mortMonthly);
     const labels1 = aligned1.dates.map(d => fmtMonth.format(d));
 
-    // Set default down payment = 20% of latest price
-    const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
-    const defaultDP = Math.round((latestPrice * 0.20) / 1000) * 1000;
+   const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
 
-    const dpInput = document.getElementById("downPayment");
-    dpInput.value = String(defaultDP);
+const dpPctInput = document.getElementById("downPaymentPct");
+const dpPctLabel = document.getElementById("dpPctLabel");
 
-    function computePayments(dpDollars) {
-      return aligned1.aVals.map((p, i) => {
-        const rate = aligned1.bVals[i];
-        const loan = Math.max(0, p - dpDollars);
-        return monthlyPayment(loan, rate, 360);
-      });
-    }
+// Default slider value
+dpPctInput.value = "20";
+dpPctLabel.textContent = "20%";
 
-    const payments0 = computePayments(defaultDP);
+
+   function computePayments(dpPct) {
+  return aligned1.aVals.map((p, i) => {
+    const rate = aligned1.bVals[i];
+    const dpDollars = p * (dpPct / 100);
+    const loan = Math.max(0, p - dpDollars);
+    return monthlyPayment(loan, rate, 360);
+  });
+}
+
+
+    const payments0 = computePayments(20);
+
 
     charts.c1 = makeMixedBarLineChart("chart1", labels1, payments0, aligned1.bVals, {
       barLabel: "Est. monthly payment (P&I)",
@@ -514,20 +522,33 @@ let recessionRanges = [];
     tile1note.textContent =
       "Home price proxy: Zillow ZHVI (typical home value; monthly, dollars). Mortgage rate is Freddie Mac weekly series averaged to monthly. Recession shading is USREC.";
 
-    const dpHint = document.getElementById("dpHint");
-    function updateDpHint(dp) {
-      const ltv = latestPrice ? (Math.max(0, latestPrice - dp) / latestPrice) * 100 : null;
-      dpHint.textContent = latestPrice ? `Latest price: $${fmtMoney0.format(latestPrice)} • LTV: ${fmtPct1.format(ltv)}%` : "";
-    }
-    updateDpHint(defaultDP);
+   const dpHint = document.getElementById("dpHint");
+function updateDpHint(dpPct) {
+  if (!latestPrice) { dpHint.textContent = ""; return; }
+  const dpDollarsLatest = latestPrice * (dpPct / 100);
+  const ltv = 100 - dpPct;
 
-    dpInput.addEventListener("input", () => {
-      const dp = Number(dpInput.value || 0);
-      const payments = computePayments(dp);
-      charts.c1.data.datasets[0].data = payments;
-      charts.c1.update();
-      updateDpHint(dp);
-    });
+  dpHint.textContent =
+    `Latest price: $${fmtMoney0.format(latestPrice)} • Down: ${dpPct}% ($${fmtMoney0.format(dpDollarsLatest)}) • LTV: ${fmtPct1.format(ltv)}%`;
+}
+updateDpHint(20);
+
+
+    dpPctInput.addEventListener("input", () => {
+  let dpPct = Number(dpPctInput.value || 0);
+  if (!Number.isFinite(dpPct)) dpPct = 0;
+
+  // Clamp to slider range (0–50)
+  dpPct = Math.max(0, Math.min(50, dpPct));
+
+  dpPctLabel.textContent = dpPct + "%";
+
+  const payments = computePayments(dpPct);
+  charts.c1.data.datasets[0].data = payments;
+  charts.c1.update();
+  updateDpHint(dpPct);
+});
+
 
     // -------------------------
     // TILE 2: existing sales + months supply
