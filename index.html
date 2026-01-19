@@ -54,6 +54,14 @@
     <div id="errText" class="error"></div>
   </div>
 
+  <div class="card">
+  <h2 style="margin-top:0;">Builder commentary (auto)</h2>
+  <div id="insightsStatus">Loading commentary...</div>
+  <ul id="insightsBullets" style="margin: 10px 0 0 18px;"></ul>
+  <div class="note" id="insightsMeta"></div>
+  <div id="insightsErr" class="error"></div>
+</div>
+
   <div class="grid">
     <!-- TILE 1 -->
     <div class="card">
@@ -115,6 +123,49 @@
 ========================= */
 const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 
+ const INSIGHTS_URL = PROXY_BASE.replace(/\/$/, "") + "/insights";
+
+async function fetchInsights() {
+  const status = document.getElementById("insightsStatus");
+  const bulletsEl = document.getElementById("insightsBullets");
+  const metaEl = document.getElementById("insightsMeta");
+  const errEl = document.getElementById("insightsErr");
+
+  // If the card isn’t on the page for some reason, just skip
+  if (!status || !bulletsEl || !metaEl || !errEl) return;
+
+  try {
+    status.textContent = "Fetching latest builder commentary...";
+    bulletsEl.innerHTML = "";
+    metaEl.textContent = "";
+    errEl.textContent = "";
+
+    const resp = await fetch(INSIGHTS_URL);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error("Insights failed (" + resp.status + "): " + txt);
+    }
+
+    const data = await resp.json();
+    status.textContent = "As of " + (data.as_of || "latest") + ":";
+
+    (data.bullets || []).forEach(b => {
+      const li = document.createElement("li");
+      li.textContent = b;
+      bulletsEl.appendChild(li);
+    });
+
+    const urls = (data.source_urls || []);
+    metaEl.textContent = urls.length ? ("Sources: " + urls.join(" • ")) : "";
+
+  } catch (e) {
+    status.textContent = "Could not load commentary.";
+    errEl.textContent = String(e && e.message ? e.message : e);
+    console.error(e);
+  }
+} 
+
+  
 // Tile 1 inputs
 const SERIES_PRICE_PROXY = "USAUCSFRCONDOSMSAMID";  // Zillow ZHVI (US) (monthly, dollars) :contentReference[oaicite:10]{index=10}
 const SERIES_MORTGAGE_30Y = "MORTGAGE30US";         // Freddie Mac weekly rate :contentReference[oaicite:11]{index=11}
@@ -436,6 +487,8 @@ let charts = {};
 let recessionRanges = [];
 
 (async function main() {
+  fetchInsights();
+  
   const statusText = document.getElementById("statusText");
   const errText = document.getElementById("errText");
 
