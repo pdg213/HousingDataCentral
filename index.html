@@ -55,12 +55,18 @@
   </div>
 
   <div class="card">
-  <h2 style="margin-top:0;">Builder commentary (auto)</h2>
+  <h2 style="margin-top:0;">AI Commentary (auto)</h2>
   <div id="insightsStatus">Loading commentary...</div>
-  <ul id="insightsBullets" style="margin: 10px 0 0 18px;"></ul>
-  <div class="note" id="insightsMeta"></div>
+
+  <h3 style="margin:10px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
+  <div id="buildersWrap"></div>
+
+  <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
+  <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
+
   <div id="insightsErr" class="error"></div>
 </div>
+
 
   <div class="grid">
     <!-- TILE 1 -->
@@ -127,20 +133,20 @@ const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 
 async function fetchInsights() {
   const status = document.getElementById("insightsStatus");
-  const bulletsEl = document.getElementById("insightsBullets");
-  const metaEl = document.getElementById("insightsMeta");
   const errEl = document.getElementById("insightsErr");
+  const buildersWrap = document.getElementById("buildersWrap");
+  const marketUl = document.getElementById("marketBullets");
 
-  // If the card isn’t on the page for some reason, just skip
-  if (!status || !bulletsEl || !metaEl || !errEl) return;
+  if (!status || !errEl || !buildersWrap || !marketUl) return;
 
   try {
-    status.textContent = "Fetching latest builder commentary...";
-    bulletsEl.innerHTML = "";
-    metaEl.textContent = "";
+    status.textContent = "Fetching latest commentary...";
     errEl.textContent = "";
+    buildersWrap.innerHTML = "";
+    marketUl.innerHTML = "";
 
-    const resp = await fetch(INSIGHTS_URL);
+    // Keep nocache=1 while testing. Remove later to use Worker caching.
+    const resp = await fetch(INSIGHTS_URL + "?nocache=1");
     if (!resp.ok) {
       const txt = await resp.text();
       throw new Error("Insights failed (" + resp.status + "): " + txt);
@@ -149,21 +155,56 @@ async function fetchInsights() {
     const data = await resp.json();
     status.textContent = "As of " + (data.as_of || "latest") + ":";
 
-    (data.bullets || []).forEach(b => {
+    // -------- Builders (3 per company) --------
+    const builders = data.builders || {};
+    const order = [
+      ["DHI", "D.R. Horton (DHI)"],
+      ["LEN", "Lennar (LEN)"],
+      ["PHM", "PulteGroup (PHM)"]
+    ];
+
+    for (const [key, label] of order) {
+      const bullets = Array.isArray(builders[key]) ? builders[key] : [];
+
+      const section = document.createElement("div");
+      section.style.margin = "6px 0 10px";
+
+      const title = document.createElement("div");
+      title.style.fontWeight = "700";
+      title.style.marginBottom = "4px";
+      title.textContent = label;
+
+      const ul = document.createElement("ul");
+      ul.style.margin = "0 0 0 18px";
+
+      bullets.forEach(b => {
+        const li = document.createElement("li");
+        li.textContent = b;
+        ul.appendChild(li);
+      });
+
+      section.appendChild(title);
+      section.appendChild(ul);
+      buildersWrap.appendChild(section);
+    }
+
+    // -------- Market (5 bullets) --------
+    const marketBullets =
+      (data.market && Array.isArray(data.market.bullets)) ? data.market.bullets : [];
+
+    marketBullets.forEach(b => {
       const li = document.createElement("li");
       li.textContent = b;
-      bulletsEl.appendChild(li);
+      marketUl.appendChild(li);
     });
-
-    metaEl.textContent = ""; // sources removed
-
 
   } catch (e) {
     status.textContent = "Could not load commentary.";
     errEl.textContent = String(e && e.message ? e.message : e);
     console.error(e);
   }
-} 
+}
+
 
   
 // Tile 1 inputs
