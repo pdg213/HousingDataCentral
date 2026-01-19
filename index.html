@@ -47,27 +47,28 @@
 
 <body>
   <h1>Housing Dashboard</h1>
-  <p class="sub">Four-tile landing page pulling public series from FRED via your Cloudflare proxy.</p>
+  <p class="sub">Six-tile landing page pulling public series from FRED via your Cloudflare proxy.</p>
 
   <div class="status">
     <div id="statusText">Loading…</div>
     <div id="errText" class="error"></div>
   </div>
 
+  <!-- AI COMMENTARY -->
   <div class="card">
-  <h2 style="margin-top:0;">AI Commentary (auto)</h2>
-  <div id="insightsStatus">Loading commentary...</div>
+    <h2 style="margin-top:0;">AI Commentary (auto)</h2>
+    <div id="insightsStatus">Loading commentary...</div>
 
-  <h3 style="margin:10px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
-  <div id="buildersWrap"></div>
+    <h3 style="margin:10px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
+    <div id="buildersWrap"></div>
 
-  <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
-  <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
+    <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
+    <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
 
-  <div id="insightsErr" class="error"></div>
-</div>
+    <div id="insightsErr" class="error"></div>
+  </div>
 
-
+  <!-- TILES -->
   <div class="grid">
     <!-- TILE 1 -->
     <div class="card">
@@ -79,10 +80,9 @@
 
       <div class="row" style="margin-bottom:10px;">
         <label for="downPaymentPct">Down payment</label>
-<input id="downPaymentPct" type="range" min="0" max="50" step="1" value="20" style="width:220px;" />
-<span id="dpPctLabel" class="pill">20%</span>
-<span id="dpHint" class="small" style="margin-left:6px;"></span>
-
+        <input id="downPaymentPct" type="range" min="0" max="50" step="1" value="20" style="width:220px;" />
+        <span id="dpPctLabel" class="pill">20%</span>
+        <span id="dpHint" class="small" style="margin-left:6px;"></span>
       </div>
 
       <canvas id="chart1"></canvas>
@@ -121,6 +121,28 @@
       <canvas id="chart4"></canvas>
       <div id="tile4note" class="note"></div>
     </div>
+
+    <!-- TILE 5 -->
+    <div class="card">
+      <h2>5) Residential construction workers + YoY %</h2>
+      <p class="meta">
+        Bars = residential construction employees (left axis). Line = YoY % change (right axis).
+        <span class="pill">20Y window</span>
+      </p>
+      <canvas id="chart5"></canvas>
+      <div id="tile5note" class="note"></div>
+    </div>
+
+    <!-- TILE 6 -->
+    <div class="card">
+      <h2>6) Consumer sentiment + Unemployment rate</h2>
+      <p class="meta">
+        Bars = consumer sentiment (left axis). Line = unemployment rate (right axis).
+        <span class="pill">20Y window</span>
+      </p>
+      <canvas id="chart6"></canvas>
+      <div id="tile6note" class="note"></div>
+    </div>
   </div>
 
 <script>
@@ -128,9 +150,41 @@
    CONFIG
 ========================= */
 const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
+const INSIGHTS_URL = PROXY_BASE.replace(/\/$/, "") + "/insights";
 
- const INSIGHTS_URL = PROXY_BASE.replace(/\/$/, "") + "/insights";
+// Tile 1 inputs
+const SERIES_PRICE_PROXY = "USAUCSFRCONDOSMSAMID";  // Zillow ZHVI (monthly)
+const SERIES_MORTGAGE_30Y = "MORTGAGE30US";         // Freddie Mac weekly -> monthly avg
 
+// Tile 2
+const SERIES_EHS = "EXHOSLUSM495S";                 // Existing Home Sales SAAR (short history)
+const SERIES_EHS_MONTHS = "HOSSUPUSM673N";          // Existing Home Sales: Months Supply
+
+// Tile 3
+const SERIES_NEW_INV = "HNFSEPUSSA";                // New One Family Homes for Sale
+const SERIES_NEW_MONTHS = "MSACSR";                 // Months supply new houses
+
+// Tile 4
+const SERIES_PERMITS_SF = "PERMIT1";                // Single-family permits SAAR
+
+// Tile 5 (NEW)
+const SERIES_RES_WORKERS = "CES2023610001";         // Residential construction employees
+
+// Tile 6 (NEW)
+const SERIES_SENTIMENT = "UMCSENT";                 // Consumer sentiment
+const SERIES_UNRATE = "UNRATE";                     // Unemployment rate
+
+// Recession shading
+const SERIES_USREC = "USREC";                       // NBER recession indicator
+
+const YEARS = 20;
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const CACHE_PREFIX = "fredcache_v1:";
+
+
+/* =========================
+   AI COMMENTARY
+========================= */
 async function fetchInsights() {
   const status = document.getElementById("insightsStatus");
   const errEl = document.getElementById("insightsErr");
@@ -145,7 +199,7 @@ async function fetchInsights() {
     buildersWrap.innerHTML = "";
     marketUl.innerHTML = "";
 
-    // Keep nocache=1 while testing. Remove later to use Worker caching.
+    // Keep nocache=1 while validating. Remove later to use Worker caching.
     const resp = await fetch(INSIGHTS_URL + "?nocache=1");
     if (!resp.ok) {
       const txt = await resp.text();
@@ -155,7 +209,6 @@ async function fetchInsights() {
     const data = await resp.json();
     status.textContent = "As of " + (data.as_of || "latest") + ":";
 
-    // -------- Builders (3 per company) --------
     const builders = data.builders || {};
     const order = [
       ["DHI", "D.R. Horton (DHI)"],
@@ -188,7 +241,6 @@ async function fetchInsights() {
       buildersWrap.appendChild(section);
     }
 
-    // -------- Market (5 bullets) --------
     const marketBullets =
       (data.market && Array.isArray(data.market.bullets)) ? data.market.bullets : [];
 
@@ -205,31 +257,6 @@ async function fetchInsights() {
   }
 }
 
-
-  
-// Tile 1 inputs
-const SERIES_PRICE_PROXY = "USAUCSFRCONDOSMSAMID";  // Zillow ZHVI (US) (monthly, dollars) :contentReference[oaicite:10]{index=10}
-const SERIES_MORTGAGE_30Y = "MORTGAGE30US";         // Freddie Mac weekly rate :contentReference[oaicite:11]{index=11}
-
-// Tile 2
-const SERIES_EHS = "EXHOSLUSM495S";                 // Existing Home Sales SAAR (short history) :contentReference[oaicite:12]{index=12}
-const SERIES_EHS_MONTHS = "HOSSUPUSM673N";          // Existing Home Sales: Months Supply :contentReference[oaicite:13]{index=13}
-
-// Tile 3
-const SERIES_NEW_INV = "HNFSEPUSSA";                // New One Family Homes for Sale :contentReference[oaicite:14]{index=14}
-const SERIES_NEW_MONTHS = "MSACSR";                 // Months supply new houses :contentReference[oaicite:15]{index=15}
-
-// Tile 4
-const SERIES_PERMITS_SF = "PERMIT1";                // Single-family permits SAAR :contentReference[oaicite:16]{index=16}
-
-// Recession shading
-const SERIES_USREC = "USREC";                       // NBER recession indicator :contentReference[oaicite:17]{index=17}
-
-const YEARS = 20;
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_PREFIX = "fredcache_v1:";
-
-
 /* =========================
    HELPERS
 ========================= */
@@ -243,26 +270,21 @@ function parseFredValue(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-
 function ymdToDate(s) { return new Date(s + "T00:00:00"); }
-
 function monthKey(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
-
 function addYears(dateObj, years) {
   const d = new Date(dateObj);
   d.setFullYear(d.getFullYear() + years);
   return d;
 }
-
 function pctChange(curr, prev) {
   if (curr === null || prev === null || prev === 0) return null;
   return (curr / prev - 1) * 100;
 }
-
 function mean(arr) {
   const clean = arr.filter(x => x !== null && x !== undefined);
   if (!clean.length) return null;
@@ -282,53 +304,37 @@ function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
 /* =========================
    FETCH (via your proxy)
 ========================= */
-function cacheKeyForSeries(seriesId) {
-  return CACHE_PREFIX + seriesId;
-}
+function cacheKeyForSeries(seriesId) { return CACHE_PREFIX + seriesId; }
 
 function readCache(seriesId) {
   try {
     const raw = localStorage.getItem(cacheKeyForSeries(seriesId));
     if (!raw) return null;
-
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
-
     const { savedAt, data } = parsed;
     if (!savedAt || !data) return null;
-
-    // TTL check
     if ((Date.now() - savedAt) > CACHE_TTL_MS) return null;
-
     return data;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function writeCache(seriesId, data) {
   try {
-    const payload = { savedAt: Date.now(), data };
-    localStorage.setItem(cacheKeyForSeries(seriesId), JSON.stringify(payload));
-  } catch {
-    // If localStorage is full or blocked, silently continue without caching
-  }
+    localStorage.setItem(cacheKeyForSeries(seriesId), JSON.stringify({ savedAt: Date.now(), data }));
+  } catch { /* ignore */ }
 }
 
 async function fetchSeries(seriesId) {
-  // 1) Try cache first
   const cached = readCache(seriesId);
   if (cached && Array.isArray(cached.observations)) {
     const obsCached = cached.observations
       .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
       .filter(o => o.value !== null)
       .sort((a, b) => a.date - b.date);
-
     if (obsCached.length) return obsCached;
-    // fall through to live fetch if cache is malformed
   }
 
-  // 2) Live fetch
   const url = new URL(PROXY_BASE);
   url.searchParams.set("series_id", seriesId);
   url.searchParams.set("file_type", "json");
@@ -338,14 +344,10 @@ async function fetchSeries(seriesId) {
     const txt = await resp.text();
     throw new Error(`${seriesId} failed (${resp.status}). Response:\n${txt}`);
   }
-
   const data = await resp.json();
-
-  // 3) Save to cache (raw JSON) for next load
   writeCache(seriesId, data);
 
   if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response shape.`);
-
   const obs = data.observations
     .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
     .filter(o => o.value !== null)
@@ -355,10 +357,9 @@ async function fetchSeries(seriesId) {
   return obs;
 }
 
-
 /* Convert any frequency to monthly averages (e.g., weekly mortgage rate -> monthly) */
 function toMonthlyAverage(obs) {
-  const bucket = new Map(); // key -> {sum, count}
+  const bucket = new Map();
   for (const o of obs) {
     const k = monthKey(o.date);
     const cur = bucket.get(k) || { sum: 0, count: 0, date: new Date(o.date.getFullYear(), o.date.getMonth(), 1) };
@@ -366,20 +367,17 @@ function toMonthlyAverage(obs) {
     cur.count += 1;
     bucket.set(k, cur);
   }
-  const out = Array.from(bucket.entries())
-    .map(([k,v]) => ({ date: v.date, value: v.sum / v.count }))
+  return Array.from(bucket.values())
+    .map(v => ({ date: v.date, value: v.sum / v.count }))
     .sort((a,b)=>a.date-b.date);
-  return out;
 }
 
-/* Filter to last N years using the series' own latest date */
 function lastNYears(obs, years) {
   const latest = obs[obs.length - 1].date;
   const start = addYears(latest, -years);
   return obs.filter(o => o.date >= start);
 }
 
-/* Align two monthly series by month (intersection) */
 function alignMonthly(aObs, bObs) {
   const aMap = new Map(aObs.map(o => [monthKey(o.date), o.value]));
   const bMap = new Map(bObs.map(o => [monthKey(o.date), o.value]));
@@ -397,7 +395,6 @@ function alignMonthly(aObs, bObs) {
    RECESSION SHADING
 ========================= */
 function recessionRangesFromUSREC(usrecMonthlyObs) {
-  // Expect monthly obs: 1 during recession, 0 otherwise
   const sorted = [...usrecMonthlyObs].sort((a,b)=>a.date-b.date);
   const ranges = [];
   let inRec = false;
@@ -407,7 +404,6 @@ function recessionRangesFromUSREC(usrecMonthlyObs) {
     const isRec = o.value >= 1;
     if (!inRec && isRec) { inRec = true; start = o.date; }
     if (inRec && !isRec) {
-      // end at previous month
       const end = new Date(o.date.getFullYear(), o.date.getMonth(), 1);
       ranges.push({ start, end });
       inRec = false; start = null;
@@ -435,16 +431,14 @@ function makeRecessionPlugin(getRanges) {
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,0.06)";
 
-      // Works reliably for category scale if we map by label index
       const labels = chart.data.labels || [];
       const labelToIndex = new Map(labels.map((lab,i)=>[lab,i]));
 
       function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
       for (const r of ranges) {
-        // Convert start/end to month labels
         const startLab = fmtMonth.format(new Date(r.start.getFullYear(), r.start.getMonth(), 1));
-        const endLab = fmtMonth.format(new Date(r.end.getFullYear(), r.end.getMonth()-1, 1)); // last included month
+        const endLab = fmtMonth.format(new Date(r.end.getFullYear(), r.end.getMonth()-1, 1));
 
         if (!labelToIndex.has(startLab) || !labelToIndex.has(endLab)) continue;
 
@@ -466,7 +460,7 @@ function makeRecessionPlugin(getRanges) {
 }
 
 /* =========================
-   CHART BUILDERS
+   CHART BUILDER
 ========================= */
 function makeMixedBarLineChart(canvasId, labels, barData, lineData, opts) {
   const ctx = document.getElementById(canvasId);
@@ -529,7 +523,7 @@ let recessionRanges = [];
 
 (async function main() {
   fetchInsights();
-  
+
   const statusText = document.getElementById("statusText");
   const errText = document.getElementById("errText");
 
@@ -537,7 +531,6 @@ let recessionRanges = [];
     statusText.textContent = "Fetching series…";
     errText.textContent = "";
 
-    // Pull everything up front (Option A)
     const [
       priceRaw,
       mortWeeklyRaw,
@@ -546,6 +539,9 @@ let recessionRanges = [];
       newInvRaw,
       newMonthsRaw,
       permitsRaw,
+      resWorkersRaw,
+      sentimentRaw,
+      unrateRaw,
       usrecRaw
     ] = await Promise.all([
       fetchSeries(SERIES_PRICE_PROXY),
@@ -555,22 +551,32 @@ let recessionRanges = [];
       fetchSeries(SERIES_NEW_INV),
       fetchSeries(SERIES_NEW_MONTHS),
       fetchSeries(SERIES_PERMITS_SF),
+      fetchSeries(SERIES_RES_WORKERS),
+      fetchSeries(SERIES_SENTIMENT),
+      fetchSeries(SERIES_UNRATE),
       fetchSeries(SERIES_USREC)
     ]);
 
     // Monthly conversions + 20Y slicing
     const price = lastNYears(priceRaw, YEARS);
     const mortMonthly = lastNYears(toMonthlyAverage(mortWeeklyRaw), YEARS);
+
     const ehs = lastNYears(ehsRaw, YEARS);
     const ehsMonths = lastNYears(ehsMonthsRaw, YEARS);
+
     const newInv = lastNYears(newInvRaw, YEARS);
     const newMonths = lastNYears(newMonthsRaw, YEARS);
+
     const permits = lastNYears(permitsRaw, YEARS);
+
+    const resWorkers = lastNYears(resWorkersRaw, YEARS);
+
+    const sentiment = lastNYears(sentimentRaw, YEARS);
+    const unrate = lastNYears(unrateRaw, YEARS);
+
     const usrecMonthly = lastNYears(usrecRaw, YEARS);
 
     recessionRanges = recessionRangesFromUSREC(usrecMonthly);
-
-    // Add shading plugin globally
     Chart.register(makeRecessionPlugin(() => recessionRanges));
 
     // -------------------------
@@ -578,31 +584,35 @@ let recessionRanges = [];
     // -------------------------
     const aligned1 = alignMonthly(price, mortMonthly);
     const labels1 = aligned1.dates.map(d => fmtMonth.format(d));
+    const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
 
-   const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
+    const dpPctInput = document.getElementById("downPaymentPct");
+    const dpPctLabel = document.getElementById("dpPctLabel");
+    const dpHint = document.getElementById("dpHint");
 
-const dpPctInput = document.getElementById("downPaymentPct");
-const dpPctLabel = document.getElementById("dpPctLabel");
+    dpPctInput.value = "20";
+    dpPctLabel.textContent = "20%";
 
-// Default slider value
-dpPctInput.value = "20";
-dpPctLabel.textContent = "20%";
+    function computePayments(dpPct) {
+      return aligned1.aVals.map((p, i) => {
+        const rate = aligned1.bVals[i];
+        const dpDollars = p * (dpPct / 100);
+        const loan = Math.max(0, p - dpDollars);
+        return monthlyPayment(loan, rate, 360);
+      });
+    }
 
+    function updateDpHint(dpPct) {
+      if (!latestPrice) { dpHint.textContent = ""; return; }
+      const dpDollarsLatest = latestPrice * (dpPct / 100);
+      const ltv = 100 - dpPct;
 
-   function computePayments(dpPct) {
-  return aligned1.aVals.map((p, i) => {
-    const rate = aligned1.bVals[i];
-    const dpDollars = p * (dpPct / 100);
-    const loan = Math.max(0, p - dpDollars);
-    return monthlyPayment(loan, rate, 360);
-  });
-}
+      dpHint.textContent =
+        `Latest price: $${fmtMoney0.format(latestPrice)} • Down: ${dpPct}% ($${fmtMoney0.format(dpDollarsLatest)}) • LTV: ${fmtPct1.format(ltv)}%`;
+    }
+    updateDpHint(20);
 
-
-    const payments0 = computePayments(20);
-
-
-    charts.c1 = makeMixedBarLineChart("chart1", labels1, payments0, aligned1.bVals, {
+    charts.c1 = makeMixedBarLineChart("chart1", labels1, computePayments(20), aligned1.bVals, {
       barLabel: "Est. monthly payment (P&I)",
       lineLabel: "30Y mortgage rate",
       barAxisTitle: "Monthly payment ($)",
@@ -611,38 +621,19 @@ dpPctLabel.textContent = "20%";
       lineTick: (v) => fmtPct1.format(v) + "%"
     });
 
-    // Notes / labels
-    const tile1note = document.getElementById("tile1note");
-    tile1note.textContent =
+    document.getElementById("tile1note").textContent =
       "Home price proxy: Zillow ZHVI (typical home value; monthly, dollars). Mortgage rate is Freddie Mac weekly series averaged to monthly. Recession shading is USREC.";
 
-   const dpHint = document.getElementById("dpHint");
-function updateDpHint(dpPct) {
-  if (!latestPrice) { dpHint.textContent = ""; return; }
-  const dpDollarsLatest = latestPrice * (dpPct / 100);
-  const ltv = 100 - dpPct;
-
-  dpHint.textContent =
-    `Latest price: $${fmtMoney0.format(latestPrice)} • Down: ${dpPct}% ($${fmtMoney0.format(dpDollarsLatest)}) • LTV: ${fmtPct1.format(ltv)}%`;
-}
-updateDpHint(20);
-
-
     dpPctInput.addEventListener("input", () => {
-  let dpPct = Number(dpPctInput.value || 0);
-  if (!Number.isFinite(dpPct)) dpPct = 0;
+      let dpPct = Number(dpPctInput.value || 0);
+      if (!Number.isFinite(dpPct)) dpPct = 0;
+      dpPct = Math.max(0, Math.min(50, dpPct));
 
-  // Clamp to slider range (0–50)
-  dpPct = Math.max(0, Math.min(50, dpPct));
-
-  dpPctLabel.textContent = dpPct + "%";
-
-  const payments = computePayments(dpPct);
-  charts.c1.data.datasets[0].data = payments;
-  charts.c1.update();
-  updateDpHint(dpPct);
-});
-
+      dpPctLabel.textContent = dpPct + "%";
+      charts.c1.data.datasets[0].data = computePayments(dpPct);
+      charts.c1.update();
+      updateDpHint(dpPct);
+    });
 
     // -------------------------
     // TILE 2: existing sales + months supply
@@ -659,10 +650,9 @@ updateDpHint(20);
       lineTick: (v) => fmtPct1.format(v)
     });
 
-    const tile2note = document.getElementById("tile2note");
-    tile2note.textContent =
+    document.getElementById("tile2note").textContent =
       (labels2.length < 36)
-        ? "Note: FRED’s Existing Home Sales + Months Supply series currently only provide recent history (begins Dec 2024). This tile plots all available data."
+        ? "Note: FRED’s Existing Home Sales + Months Supply series currently only provide recent history (begins Dec 2024). This tile plots all available data. Recession shading is USREC."
         : "Recession shading is USREC.";
 
     // -------------------------
@@ -686,12 +676,12 @@ updateDpHint(20);
     // -------------------------
     // TILE 4: permits + YoY line
     // -------------------------
-    const permits20 = permits; // already 20Y
+    const permits20 = permits;
     const labels4 = permits20.map(o => fmtMonth.format(o.date));
     const permitVals = permits20.map(o => o.value);
-    const yoyVals = permits20.map((o, i) => (i >= 12) ? pctChange(o.value, permits20[i-12].value) : null);
+    const yoyPermits = permits20.map((o, i) => (i >= 12) ? pctChange(o.value, permits20[i-12].value) : null);
 
-    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyVals, {
+    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyPermits, {
       barLabel: "Single-family permits (SAAR)",
       lineLabel: "YoY % change",
       barAxisTitle: "Permits (SAAR)",
@@ -702,6 +692,43 @@ updateDpHint(20);
 
     document.getElementById("tile4note").textContent =
       "YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
+
+    // -------------------------
+    // TILE 5: res construction workers + YoY
+    // -------------------------
+    const labels5 = resWorkers.map(o => fmtMonth.format(o.date));
+    const workersVals = resWorkers.map(o => o.value);
+    const yoyWorkers = resWorkers.map((o, i) => (i >= 12) ? pctChange(o.value, resWorkers[i-12].value) : null);
+
+    charts.c5 = makeMixedBarLineChart("chart5", labels5, workersVals, yoyWorkers, {
+      barLabel: "Residential construction employees",
+      lineLabel: "YoY % change",
+      barAxisTitle: "Employees",
+      lineAxisTitle: "YoY (%)",
+      barTick: (v) => fmtNum0.format(v),
+      lineTick: (v) => fmtPct1.format(v) + "%"
+    });
+
+    document.getElementById("tile5note").textContent =
+      "Bars are CES2023610001 (residential construction employment). Line is YoY % change. Recession shading is USREC.";
+
+    // -------------------------
+    // TILE 6: sentiment + unemployment
+    // -------------------------
+    const aligned6 = alignMonthly(sentiment, unrate);
+    const labels6 = aligned6.dates.map(d => fmtMonth.format(d));
+
+    charts.c6 = makeMixedBarLineChart("chart6", labels6, aligned6.aVals, aligned6.bVals, {
+      barLabel: "Consumer sentiment (UMCSENT)",
+      lineLabel: "Unemployment rate (UNRATE)",
+      barAxisTitle: "Sentiment index",
+      lineAxisTitle: "Unemployment (%)",
+      barTick: (v) => fmtNum0.format(v),
+      lineTick: (v) => fmtPct1.format(v) + "%"
+    });
+
+    document.getElementById("tile6note").textContent =
+      "Bars are UMCSENT. Line is UNRATE. Recession shading is USREC.";
 
     // Status
     const latestAny = priceRaw[priceRaw.length - 1].date;
