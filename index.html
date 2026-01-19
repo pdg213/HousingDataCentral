@@ -5,398 +5,545 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Housing Data Central</title>
 
-  <!-- Chart.js via CDN -->
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.35; }
-    h1 { margin: 0 0 6px; }
-    .sub { color: #555; margin: 0 0 18px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 14px 0; }
-    canvas { max-width: 100%; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 8px; text-align: right; }
-    th:first-child, td:first-child { text-align: left; }
-    th { background: #fafafa; position: sticky; top: 0; }
-    .note { color: #666; font-size: 13px; margin-top: 8px; }
-    .error { color: #b00020; white-space: pre-wrap; }
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+    }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px; margin: 14px 0 18px; background: var(--card); box-shadow: var(--shadow); }
     .ok { color: #1a7f37; }
+    .error { color: #b00020; white-space: pre-wrap; margin-top: 8px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 1100px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); }
+    .card h2 { margin: 0 0 6px; font-size: 16px; }
+    .meta { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
+    .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+    .row { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+    label { font-size: 12.5px; color: var(--muted); }
+    input[type="number"]{ padding: 7px 9px; border:1px solid var(--border); border-radius:10px; width: 160px; }
+    canvas { width: 100% !important; height: 280px !important; }
+    .small { font-size: 12.5px; color: var(--muted); }
+    .pill { display:inline-block; padding:3px 8px; border:1px solid var(--border); border-radius: 999px; font-size: 12px; color:#333; background:#fafafa; }
   </style>
 </head>
 
 <body>
-  <div style="display:flex; gap:12px; align-items:baseline; flex-wrap:wrap;">
-  <h1 style="margin:0;">HousingDataCentral</h1>
+  <h1>Housing Dashboard</h1>
+  <p class="sub">Four-tile landing page pulling public series from FRED via your Cloudflare proxy.</p>
 
-  <label for="seriesSelect" style="color:#555;">
-    Series:
-    <select id="seriesSelect" style="margin-left:6px; padding:6px 8px;"></select>
-  </label>
-</div>
-
-<p class="sub" id="seriesMeta">
-  Loading series...
-</p>
-
-  <div class="card">
-    <div id="status">Loading data...</div>
-    <div id="err" class="error"></div>
+  <div class="status">
+    <div id="statusText">Loading…</div>
+    <div id="errText" class="error"></div>
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0;">Last 20 years (line chart)</h2>
-    <canvas id="chart" height="110"></canvas>
-    <div class="note">Chart shows the last 20 years ending at the latest available observation.</div>
-  </div>
+  <div class="grid">
+    <!-- TILE 1 -->
+    <div class="card">
+      <h2>1) Median monthly payment (P&I) + 30Y mortgage rate</h2>
+      <p class="meta">
+        Bars = estimated monthly P&I payment (left axis). Line = 30Y mortgage rate (right axis).
+        <span class="pill">20Y window</span>
+      </p>
 
-  <div class="card">
-    <h2 style="margin-top:0;">Most recent 18 months (table)</h2>
-    <div style="overflow:auto; max-height: 520px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Month reported</th>
-            <th>Raw data number</th>
-            <th>% change y/y</th>
-            <th>% change q/q</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+      <div class="row" style="margin-bottom:10px;">
+        <label for="downPayment">Down payment ($)</label>
+        <input id="downPayment" type="number" min="0" step="1000" />
+        <span id="dpHint" class="small"></span>
+      </div>
+
+      <canvas id="chart1"></canvas>
+      <div id="tile1note" class="note"></div>
     </div>
-    <div class="note">
-      q/q definition: average of last 3 months vs average of prior 3 months (percent change).
+
+    <!-- TILE 2 -->
+    <div class="card">
+      <h2>2) Existing Home Sales (SAAR) + Months Supply</h2>
+      <p class="meta">
+        Bars = existing home sales SAAR (left axis). Line = months supply (right axis).
+        <span class="pill">20Y window (shows what exists)</span>
+      </p>
+      <canvas id="chart2"></canvas>
+      <div id="tile2note" class="note"></div>
+    </div>
+
+    <!-- TILE 3 -->
+    <div class="card">
+      <h2>3) New Home Inventory + Months Supply (New Homes)</h2>
+      <p class="meta">
+        Bars = new homes for sale (left axis). Line = months supply (right axis).
+        <span class="pill">20Y window</span>
+      </p>
+      <canvas id="chart3"></canvas>
+      <div id="tile3note" class="note"></div>
+    </div>
+
+    <!-- TILE 4 -->
+    <div class="card">
+      <h2>4) Single-Family Permits (SAAR) + YoY % (full line)</h2>
+      <p class="meta">
+        Bars = permits SAAR (left axis). Line = YoY % change (right axis, every month).
+        <span class="pill">20Y window</span>
+      </p>
+      <canvas id="chart4"></canvas>
+      <div id="tile4note" class="note"></div>
     </div>
   </div>
 
 <script>
-  // =========================================================
-  // CONFIG
-  // =========================================================
-  const FRED_OBS_URL = "https://fred-proxy.patrick-grow.workers.dev";
+/* =========================
+   CONFIG
+========================= */
+const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 
-  const SERIES_LIST = [
-    { id: "HSN1F",        name: "New Home Sales (SAAR)" },
-    { id: "MSACSR",       name: "Months of Inventory (New Homes)" },
-    { id: "MSPNHSUS",     name: "Median Sales Price (New Homes)" },
-    { id: "MSPUS",        name: "Median Sales Price (All Homes)" },
-    { id: "HOUST",        name: "Housing Starts (Total)" },
-    { id: "HOUST1F",      name: "Housing Starts (Single-Family)" },
-    { id: "PERMIT1",      name: "Permits (Single-Family)" },
-    { id: "MORTGAGE30US", name: "30-Year Mortgage Rate (monthly avg)" }
-  ];
+// Tile 1 inputs
+const SERIES_PRICE_PROXY = "USAUCSFRCONDOSMSAMID";  // Zillow ZHVI (US) (monthly, dollars) :contentReference[oaicite:10]{index=10}
+const SERIES_MORTGAGE_30Y = "MORTGAGE30US";         // Freddie Mac weekly rate :contentReference[oaicite:11]{index=11}
 
-  const RECESSION_SERIES_ID = "USREC"; // NBER recession indicator (0/1, monthly)
+// Tile 2
+const SERIES_EHS = "EXHOSLUSM495S";                 // Existing Home Sales SAAR (short history) :contentReference[oaicite:12]{index=12}
+const SERIES_EHS_MONTHS = "HOSSUPUSM673N";          // Existing Home Sales: Months Supply :contentReference[oaicite:13]{index=13}
 
-  // =========================================================
-  // Helpers
-  // =========================================================
-  const fmtNumber0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
-  const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+// Tile 3
+const SERIES_NEW_INV = "HNFSEPUSSA";                // New One Family Homes for Sale :contentReference[oaicite:14]{index=14}
+const SERIES_NEW_MONTHS = "MSACSR";                 // Months supply new houses :contentReference[oaicite:15]{index=15}
 
-  // Per-series formatting (keeps table “obviously correct”)
-  function formatValue(seriesId, v) {
-    if (v === null || v === undefined) return "-";
-    if (seriesId === "MORTGAGE30US") return fmtPct1.format(v) + "%";
-    if (seriesId === "MSPNHSUS" || seriesId === "MSPUS") return "$" + fmtNumber0.format(v);
-    return fmtNumber0.format(v);
+// Tile 4
+const SERIES_PERMITS_SF = "PERMIT1";                // Single-family permits SAAR :contentReference[oaicite:16]{index=16}
+
+// Recession shading
+const SERIES_USREC = "USREC";                       // NBER recession indicator :contentReference[oaicite:17]{index=17}
+
+const YEARS = 20;
+
+/* =========================
+   HELPERS
+========================= */
+const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+const fmtMoney0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const fmtNum0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+
+function parseFredValue(v) {
+  if (v === "." || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ymdToDate(s) { return new Date(s + "T00:00:00"); }
+
+function monthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function addYears(dateObj, years) {
+  const d = new Date(dateObj);
+  d.setFullYear(d.getFullYear() + years);
+  return d;
+}
+
+function pctChange(curr, prev) {
+  if (curr === null || prev === null || prev === 0) return null;
+  return (curr / prev - 1) * 100;
+}
+
+function mean(arr) {
+  const clean = arr.filter(x => x !== null && x !== undefined);
+  if (!clean.length) return null;
+  return clean.reduce((a,b)=>a+b,0) / clean.length;
+}
+
+// Loan payment formula (P&I): M = L * r / (1 - (1+r)^-n)
+function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
+  if (loanAmount === null || annualRatePct === null) return null;
+  const r = (annualRatePct / 100) / 12;
+  if (r === 0) return loanAmount / nMonths;
+  const denom = 1 - Math.pow(1 + r, -nMonths);
+  if (denom === 0) return null;
+  return loanAmount * r / denom;
+}
+
+/* =========================
+   FETCH (via your proxy)
+========================= */
+async function fetchSeries(seriesId) {
+  const url = new URL(PROXY_BASE);
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("file_type", "json");
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`${seriesId} failed (${resp.status}). Response:\n${txt}`);
   }
 
-  function formatPct(v) {
-    if (v === null || v === undefined) return "-";
-    return fmtPct1.format(v) + "%";
+  const data = await resp.json();
+  if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response shape.`);
+
+  const obs = data.observations
+    .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+    .filter(o => o.value !== null)
+    .sort((a,b)=>a.date-b.date);
+
+  if (!obs.length) throw new Error(`${seriesId}: no observations after filtering.`);
+  return obs;
+}
+
+/* Convert any frequency to monthly averages (e.g., weekly mortgage rate -> monthly) */
+function toMonthlyAverage(obs) {
+  const bucket = new Map(); // key -> {sum, count}
+  for (const o of obs) {
+    const k = monthKey(o.date);
+    const cur = bucket.get(k) || { sum: 0, count: 0, date: new Date(o.date.getFullYear(), o.date.getMonth(), 1) };
+    cur.sum += o.value;
+    cur.count += 1;
+    bucket.set(k, cur);
   }
+  const out = Array.from(bucket.entries())
+    .map(([k,v]) => ({ date: v.date, value: v.sum / v.count }))
+    .sort((a,b)=>a.date-b.date);
+  return out;
+}
 
-  function parseFredValue(v) {
-    if (v === "." || v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
+/* Filter to last N years using the series' own latest date */
+function lastNYears(obs, years) {
+  const latest = obs[obs.length - 1].date;
+  const start = addYears(latest, -years);
+  return obs.filter(o => o.date >= start);
+}
 
-  function mean(nums) {
-    const clean = nums.filter(n => n !== null && n !== undefined);
-    if (clean.length === 0) return null;
-    return clean.reduce((a, b) => a + b, 0) / clean.length;
-  }
+/* Align two monthly series by month (intersection) */
+function alignMonthly(aObs, bObs) {
+  const aMap = new Map(aObs.map(o => [monthKey(o.date), o.value]));
+  const bMap = new Map(bObs.map(o => [monthKey(o.date), o.value]));
+  const keys = Array.from(aMap.keys()).filter(k => bMap.has(k)).sort();
+  const dates = keys.map(k => {
+    const [y,m] = k.split("-");
+    return new Date(Number(y), Number(m)-1, 1);
+  });
+  const aVals = keys.map(k => aMap.get(k));
+  const bVals = keys.map(k => bMap.get(k));
+  return { dates, aVals, bVals, keys };
+}
 
-  function pctChange(curr, prev) {
-    if (curr === null || prev === null) return null;
-    if (prev === 0) return null;
-    return (curr / prev - 1) * 100;
-  }
+/* =========================
+   RECESSION SHADING
+========================= */
+function recessionRangesFromUSREC(usrecMonthlyObs) {
+  // Expect monthly obs: 1 during recession, 0 otherwise
+  const sorted = [...usrecMonthlyObs].sort((a,b)=>a.date-b.date);
+  const ranges = [];
+  let inRec = false;
+  let start = null;
 
-  function addYears(dateObj, years) {
-    const d = new Date(dateObj);
-    d.setFullYear(d.getFullYear() + years);
-    return d;
-  }
-
-  function monthKey(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    return y + "-" + m; // e.g., 2024-07
-  }
-
-  // Convert any frequency (weekly included) into monthly observations by averaging within each month.
-  function toMonthly(obs) {
-    const buckets = new Map(); // key -> { date: firstOfMonth, values: [] }
-
-    for (const o of obs) {
-      const key = monthKey(o.date);
-      if (!buckets.has(key)) {
-        buckets.set(key, {
-          date: new Date(o.date.getFullYear(), o.date.getMonth(), 1),
-          values: []
-        });
-      }
-      buckets.get(key).values.push(o.value);
-    }
-
-    const monthly = [];
-    for (const [, b] of buckets) {
-      const avg = mean(b.values);
-      if (avg !== null) monthly.push({ date: b.date, value: avg });
-    }
-
-    monthly.sort((a, b) => a.date - b.date);
-    return monthly;
-  }
-
-  function sliceLast20Years(obs) {
-    const latest = obs[obs.length - 1].date;
-    const start = addYears(latest, -20);
-    return obs.filter(o => o.date >= start);
-  }
-
-  // =========================================================
-  // Fetch (via your Cloudflare Worker)
-  // =========================================================
-  async function fetchSeriesMonthly(seriesId) {
-    const url = new URL(FRED_OBS_URL);
-    url.searchParams.set("series_id", seriesId);
-    url.searchParams.set("file_type", "json");
-
-    const resp = await fetch(url.toString());
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error("Request failed (" + resp.status + ")\n" + txt);
-    }
-
-    const data = await resp.json();
-    if (!data || !Array.isArray(data.observations)) {
-      throw new Error("Unexpected response shape for " + seriesId);
-    }
-
-    const obs = data.observations
-      .map(o => ({ date: new Date(o.date + "T00:00:00"), value: parseFredValue(o.value) }))
-      .filter(o => o.value !== null)
-      .sort((a, b) => a.date - b.date);
-
-    if (obs.length === 0) throw new Error("No observations returned for " + seriesId);
-
-    return toMonthly(obs);
-  }
-
-  // =========================================================
-  // Table calcs (monthly)
-  // =========================================================
-  function computeTableRows(obsMonthly) {
-    const rows = obsMonthly.map((o, i) => {
-      const yoy = (i >= 12) ? pctChange(o.value, obsMonthly[i - 12].value) : null;
-
-      // QoQ definition: avg(last 3 months) vs avg(prior 3 months)
-      const currQ = (i >= 2) ? mean([obsMonthly[i].value, obsMonthly[i - 1].value, obsMonthly[i - 2].value]) : null;
-      const prevQ = (i >= 5) ? mean([obsMonthly[i - 3].value, obsMonthly[i - 4].value, obsMonthly[i - 5].value]) : null;
-      const qoq = (currQ !== null && prevQ !== null) ? pctChange(currQ, prevQ) : null;
-
-      return { date: o.date, value: o.value, yoy, qoq };
-    });
-
-    return rows.slice(-18).reverse(); // newest first
-  }
-
-  function renderTable(seriesId, rows18) {
-    const tbody = document.getElementById("tbody");
-    tbody.innerHTML = "";
-
-    for (const r of rows18) {
-      const tr = document.createElement("tr");
-
-      const monthTd = document.createElement("td");
-      monthTd.textContent = fmtMonth.format(r.date);
-
-      const valTd = document.createElement("td");
-      valTd.textContent = formatValue(seriesId, r.value);
-
-      const yoyTd = document.createElement("td");
-      yoyTd.textContent = formatPct(r.yoy);
-
-      const qoqTd = document.createElement("td");
-      qoqTd.textContent = formatPct(r.qoq);
-
-      tr.appendChild(monthTd);
-      tr.appendChild(valTd);
-      tr.appendChild(yoyTd);
-      tr.appendChild(qoqTd);
-
-      tbody.appendChild(tr);
+  for (const o of sorted) {
+    const isRec = o.value >= 1;
+    if (!inRec && isRec) { inRec = true; start = o.date; }
+    if (inRec && !isRec) {
+      // end at previous month
+      const end = new Date(o.date.getFullYear(), o.date.getMonth(), 1);
+      ranges.push({ start, end });
+      inRec = false; start = null;
     }
   }
+  if (inRec && start) {
+    const last = sorted[sorted.length - 1].date;
+    const end = new Date(last.getFullYear(), last.getMonth()+1, 1);
+    ranges.push({ start, end });
+  }
+  return ranges;
+}
 
-  // =========================================================
-  // Recession shading (USREC)
-  // =========================================================
-  let chart; // Chart.js instance
-
-  const recessionShadingPlugin = {
+function makeRecessionPlugin(getRanges) {
+  return {
     id: "recessionShading",
-    beforeDatasetsDraw(chartInstance, args, opts) {
-      const { ctx, chartArea, scales } = chartInstance;
-      if (!chartArea) return;
+    beforeDatasetsDraw(chart) {
+      const ranges = getRanges();
+      if (!ranges || !ranges.length) return;
 
-      const xScale = scales.x;
-      const bands = (opts && opts.bands) ? opts.bands : [];
-      if (!bands.length) return;
+      const { ctx, chartArea, scales } = chart;
+      const x = scales.x;
+      if (!x || !chartArea) return;
 
       ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.08)";
+      ctx.fillStyle = "rgba(0,0,0,0.06)";
 
-      for (const b of bands) {
-        const x0 = xScale.getPixelForValue(b.startLabel);
-        const x1 = xScale.getPixelForValue(b.endLabel);
-        const left = Math.min(x0, x1);
-        const width = Math.abs(x1 - x0);
-        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
+      // Works reliably for category scale if we map by label index
+      const labels = chart.data.labels || [];
+      const labelToIndex = new Map(labels.map((lab,i)=>[lab,i]));
+
+      function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+      for (const r of ranges) {
+        // Convert start/end to month labels
+        const startLab = fmtMonth.format(new Date(r.start.getFullYear(), r.start.getMonth(), 1));
+        const endLab = fmtMonth.format(new Date(r.end.getFullYear(), r.end.getMonth()-1, 1)); // last included month
+
+        if (!labelToIndex.has(startLab) || !labelToIndex.has(endLab)) continue;
+
+        const i0 = labelToIndex.get(startLab);
+        const i1 = labelToIndex.get(endLab);
+
+        const px0 = x.getPixelForValue(i0);
+        const px1 = x.getPixelForValue(i1);
+
+        const left = clamp(Math.min(px0, px1), chartArea.left, chartArea.right);
+        const right = clamp(Math.max(px0, px1), chartArea.left, chartArea.right);
+
+        ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
       }
+
       ctx.restore();
     }
   };
+}
 
-  function buildRecessionBands(usrec20y, labels20y) {
-    const recByLabel = new Map(usrec20y.map(o => [fmtMonth.format(o.date), o.value]));
-    const bands = [];
+/* =========================
+   CHART BUILDERS
+========================= */
+function makeMixedBarLineChart(canvasId, labels, barData, lineData, opts) {
+  const ctx = document.getElementById(canvasId);
 
-    let inRec = false;
-    let startLabel = null;
-
-    for (let i = 0; i < labels20y.length; i++) {
-      const lab = labels20y[i];
-      const v = recByLabel.get(lab);
-      const isRec = (v === 1);
-
-      if (isRec && !inRec) {
-        inRec = true;
-        startLabel = lab;
-      }
-
-      if (!isRec && inRec) {
-        inRec = false;
-        const endLabel = labels20y[i - 1] || startLabel;
-        bands.push({ startLabel, endLabel });
-        startLabel = null;
-      }
-    }
-
-    if (inRec && startLabel) {
-      bands.push({ startLabel, endLabel: labels20y[labels20y.length - 1] });
-    }
-
-    return bands;
-  }
-
-  function renderChart(seriesName, obs20y, usrec20y) {
-    const labels = obs20y.map(o => fmtMonth.format(o.date));
-    const values = obs20y.map(o => o.value);
-
-    const bands = buildRecessionBands(usrec20y, labels);
-
-    const ctx = document.getElementById("chart");
-    if (chart) chart.destroy();
-
-    chart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          label: seriesName,
-          data: values,
+  return new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: opts.barLabel,
+          data: barData,
+          yAxisID: "yBar",
+          backgroundColor: "rgba(60, 120, 200, 0.45)",
+          borderColor: "rgba(60, 120, 200, 0.85)",
+          borderWidth: 1
+        },
+        {
+          type: "line",
+          label: opts.lineLabel,
+          data: lineData,
+          yAxisID: "yLine",
           tension: 0.15,
           pointRadius: 0,
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { display: true },
-          recessionShading: { bands }
-        },
-        scales: {
-          x: { ticks: { maxTicksLimit: 12 } },
-          y: { ticks: { callback: (v) => fmtNumber0.format(v) } }
+          borderWidth: 2,
+          borderColor: "rgba(220, 90, 80, 0.95)"
         }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true }
       },
-      plugins: [recessionShadingPlugin]
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        yBar: {
+          position: "left",
+          ticks: { callback: (v) => opts.barTick(v) },
+          title: { display: true, text: opts.barAxisTitle }
+        },
+        yLine: {
+          position: "right",
+          grid: { drawOnChartArea: false },
+          ticks: { callback: (v) => opts.lineTick(v) },
+          title: { display: true, text: opts.lineAxisTitle }
+        }
+      }
+    }
+  });
+}
+
+/* =========================
+   MAIN
+========================= */
+let charts = {};
+let recessionRanges = [];
+
+(async function main() {
+  const statusText = document.getElementById("statusText");
+  const errText = document.getElementById("errText");
+
+  try {
+    statusText.textContent = "Fetching series…";
+    errText.textContent = "";
+
+    // Pull everything up front (Option A)
+    const [
+      priceRaw,
+      mortWeeklyRaw,
+      ehsRaw,
+      ehsMonthsRaw,
+      newInvRaw,
+      newMonthsRaw,
+      permitsRaw,
+      usrecRaw
+    ] = await Promise.all([
+      fetchSeries(SERIES_PRICE_PROXY),
+      fetchSeries(SERIES_MORTGAGE_30Y),
+      fetchSeries(SERIES_EHS),
+      fetchSeries(SERIES_EHS_MONTHS),
+      fetchSeries(SERIES_NEW_INV),
+      fetchSeries(SERIES_NEW_MONTHS),
+      fetchSeries(SERIES_PERMITS_SF),
+      fetchSeries(SERIES_USREC)
+    ]);
+
+    // Monthly conversions + 20Y slicing
+    const price = lastNYears(priceRaw, YEARS);
+    const mortMonthly = lastNYears(toMonthlyAverage(mortWeeklyRaw), YEARS);
+    const ehs = lastNYears(ehsRaw, YEARS);
+    const ehsMonths = lastNYears(ehsMonthsRaw, YEARS);
+    const newInv = lastNYears(newInvRaw, YEARS);
+    const newMonths = lastNYears(newMonthsRaw, YEARS);
+    const permits = lastNYears(permitsRaw, YEARS);
+    const usrecMonthly = lastNYears(usrecRaw, YEARS);
+
+    recessionRanges = recessionRangesFromUSREC(usrecMonthly);
+
+    // Add shading plugin globally
+    Chart.register(makeRecessionPlugin(() => recessionRanges));
+
+    // -------------------------
+    // TILE 1: payment + rate
+    // -------------------------
+    const aligned1 = alignMonthly(price, mortMonthly);
+    const labels1 = aligned1.dates.map(d => fmtMonth.format(d));
+
+    // Set default down payment = 20% of latest price
+    const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
+    const defaultDP = Math.round((latestPrice * 0.20) / 1000) * 1000;
+
+    const dpInput = document.getElementById("downPayment");
+    dpInput.value = String(defaultDP);
+
+    function computePayments(dpDollars) {
+      return aligned1.aVals.map((p, i) => {
+        const rate = aligned1.bVals[i];
+        const loan = Math.max(0, p - dpDollars);
+        return monthlyPayment(loan, rate, 360);
+      });
+    }
+
+    const payments0 = computePayments(defaultDP);
+
+    charts.c1 = makeMixedBarLineChart("chart1", labels1, payments0, aligned1.bVals, {
+      barLabel: "Est. monthly payment (P&I)",
+      lineLabel: "30Y mortgage rate",
+      barAxisTitle: "Monthly payment ($)",
+      lineAxisTitle: "Mortgage rate (%)",
+      barTick: (v) => "$" + fmtMoney0.format(v),
+      lineTick: (v) => fmtPct1.format(v) + "%"
     });
-  }
 
-  // =========================================================
-  // UI + Main
-  // =========================================================
-  function populateDropdown() {
-    const sel = document.getElementById("seriesSelect");
-    sel.innerHTML = "";
-    for (const s of SERIES_LIST) {
-      const opt = document.createElement("option");
-      opt.value = s.id;
-      opt.textContent = s.name;
-      sel.appendChild(opt);
+    // Notes / labels
+    const tile1note = document.getElementById("tile1note");
+    tile1note.textContent =
+      "Home price proxy: Zillow ZHVI (typical home value; monthly, dollars). Mortgage rate is Freddie Mac weekly series averaged to monthly. Recession shading is USREC.";
+
+    const dpHint = document.getElementById("dpHint");
+    function updateDpHint(dp) {
+      const ltv = latestPrice ? (Math.max(0, latestPrice - dp) / latestPrice) * 100 : null;
+      dpHint.textContent = latestPrice ? `Latest price: $${fmtMoney0.format(latestPrice)} • LTV: ${fmtPct1.format(ltv)}%` : "";
     }
+    updateDpHint(defaultDP);
+
+    dpInput.addEventListener("input", () => {
+      const dp = Number(dpInput.value || 0);
+      const payments = computePayments(dp);
+      charts.c1.data.datasets[0].data = payments;
+      charts.c1.update();
+      updateDpHint(dp);
+    });
+
+    // -------------------------
+    // TILE 2: existing sales + months supply
+    // -------------------------
+    const aligned2 = alignMonthly(ehs, ehsMonths);
+    const labels2 = aligned2.dates.map(d => fmtMonth.format(d));
+
+    charts.c2 = makeMixedBarLineChart("chart2", labels2, aligned2.aVals, aligned2.bVals, {
+      barLabel: "Existing Home Sales (SAAR)",
+      lineLabel: "Months supply",
+      barAxisTitle: "Sales (SAAR, units)",
+      lineAxisTitle: "Months",
+      barTick: (v) => fmtNum0.format(v),
+      lineTick: (v) => fmtPct1.format(v)
+    });
+
+    const tile2note = document.getElementById("tile2note");
+    tile2note.textContent =
+      (labels2.length < 36)
+        ? "Note: FRED’s Existing Home Sales + Months Supply series currently only provide recent history (begins Dec 2024). This tile plots all available data."
+        : "Recession shading is USREC.";
+
+    // -------------------------
+    // TILE 3: new inventory + months supply
+    // -------------------------
+    const aligned3 = alignMonthly(newInv, newMonths);
+    const labels3 = aligned3.dates.map(d => fmtMonth.format(d));
+
+    charts.c3 = makeMixedBarLineChart("chart3", labels3, aligned3.aVals, aligned3.bVals, {
+      barLabel: "New homes for sale (inventory)",
+      lineLabel: "Months supply (new homes)",
+      barAxisTitle: "Inventory (thousands)",
+      lineAxisTitle: "Months",
+      barTick: (v) => fmtNum0.format(v),
+      lineTick: (v) => fmtPct1.format(v)
+    });
+
+    document.getElementById("tile3note").textContent =
+      "Inventory series is 'New One Family Homes for Sale' (thousands). Months supply is MSACSR. Recession shading is USREC.";
+
+    // -------------------------
+    // TILE 4: permits + YoY line
+    // -------------------------
+    const permits20 = permits; // already 20Y
+    const labels4 = permits20.map(o => fmtMonth.format(o.date));
+    const permitVals = permits20.map(o => o.value);
+    const yoyVals = permits20.map((o, i) => (i >= 12) ? pctChange(o.value, permits20[i-12].value) : null);
+
+    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyVals, {
+      barLabel: "Single-family permits (SAAR)",
+      lineLabel: "YoY % change",
+      barAxisTitle: "Permits (SAAR)",
+      lineAxisTitle: "YoY (%)",
+      barTick: (v) => fmtNum0.format(v),
+      lineTick: (v) => fmtPct1.format(v) + "%"
+    });
+
+    document.getElementById("tile4note").textContent =
+      "YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
+
+    // Status
+    const latestAny = priceRaw[priceRaw.length - 1].date;
+    statusText.innerHTML = `<span class="ok">Loaded</span> all series. Latest price-proxy observation: ${fmtMonth.format(latestAny)}.`;
+
+  } catch (e) {
+    statusText.textContent = "Could not load data.";
+    errText.textContent = String(e && e.message ? e.message : e);
+    console.error(e);
   }
-
-  async function loadAndRender(seriesId) {
-    const status = document.getElementById("status");
-    const err = document.getElementById("err");
-    const meta = document.getElementById("seriesMeta");
-
-    const selected = SERIES_LIST.find(s => s.id === seriesId) || { id: seriesId, name: seriesId };
-
-    try {
-      status.textContent = "Fetching " + selected.id + "...";
-      err.textContent = "";
-      meta.textContent = "Selected: " + selected.name;
-
-      const [obsMonthly, usrecMonthly] = await Promise.all([
-        fetchSeriesMonthly(seriesId),
-        fetchSeriesMonthly(RECESSION_SERIES_ID)
-      ]);
-
-      const latest = obsMonthly[obsMonthly.length - 1].date;
-      status.innerHTML = "<span class='ok'>Loaded</span> " + obsMonthly.length + " monthly observations. Latest: " + fmtMonth.format(latest) + ".";
-
-      const obs20y = sliceLast20Years(obsMonthly);
-      const usrec20y = sliceLast20Years(usrecMonthly);
-
-      renderChart(selected.name, obs20y, usrec20y);
-      renderTable(seriesId, computeTableRows(obsMonthly));
-
-    } catch (e) {
-      status.textContent = "Could not load data.";
-      err.textContent = String(e && e.message ? e.message : e);
-      console.error(e);
-    }
-  }
-
-  (function init() {
-    populateDropdown();
-
-    const sel = document.getElementById("seriesSelect");
-    sel.addEventListener("change", () => loadAndRender(sel.value));
-
-    // initial load = first item
-    loadAndRender(sel.value || SERIES_LIST[0].id);
-  })();
+})();
 </script>
 
 </body>
