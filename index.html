@@ -113,9 +113,9 @@
 
     <!-- TILE 4 -->
     <div class="card">
-      <h2>4) Single-Family Permits (SAAR) + YoY % (full line)</h2>
+      <h2>4) Single-Family Starts (SAAR) + YoY % (full line)</h2>
       <p class="meta">
-        Bars = permits SAAR (left axis). Line = YoY % change (right axis, every month).
+        Bars = single-family starts SAAR (left axis). Line = YoY % change (right axis, every month).
         <span class="pill">20Y window</span>
       </p>
       <canvas id="chart4"></canvas>
@@ -165,8 +165,8 @@ const SERIES_NEW_INV = "HNFSEPUSSA";                // New One Family Homes for 
 const SERIES_NEW_MONTHS = "MSACSR";                 // Months supply new houses
 
 // Tile 4
-const SERIES_PERMITS_SF = "PERMIT1";                // Single-family permits SAAR
-
+const SERIES_STARTS_SF = "HOUST1F"; 
+  
 // Tile 5 (NEW)
 const SERIES_RES_WORKERS = "CES2023610001";         // Residential construction employees
 
@@ -550,7 +550,7 @@ let recessionRanges = [];
       fetchSeries(SERIES_EHS_MONTHS),
       fetchSeries(SERIES_NEW_INV),
       fetchSeries(SERIES_NEW_MONTHS),
-      fetchSeries(SERIES_PERMITS_SF),
+      fetchSeries(SERIES_STARTS_SF),
       fetchSeries(SERIES_RES_WORKERS),
       fetchSeries(SERIES_SENTIMENT),
       fetchSeries(SERIES_UNRATE),
@@ -681,17 +681,17 @@ let recessionRanges = [];
     const permitVals = permits20.map(o => o.value);
     const yoyPermits = permits20.map((o, i) => (i >= 12) ? pctChange(o.value, permits20[i-12].value) : null);
 
-    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyPermits, {
-      barLabel: "Single-family permits (SAAR)",
-      lineLabel: "YoY % change",
-      barAxisTitle: "Permits (SAAR)",
-      lineAxisTitle: "YoY (%)",
-      barTick: (v) => fmtNum0.format(v),
-      lineTick: (v) => fmtPct1.format(v) + "%"
-    });
+    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyVals, {
+  barLabel: "Single-family starts (SAAR)",
+  lineLabel: "YoY % change",
+  barAxisTitle: "Starts (SAAR)",
+  lineAxisTitle: "YoY (%)",
+  barTick: (v) => fmtNum0.format(v),
+  lineTick: (v) => fmtPct1.format(v) + "%"
+});
 
     document.getElementById("tile4note").textContent =
-      "YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
+      "Starts series is HOUST1F (single-family starts, SAAR). YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
 
     // -------------------------
     // TILE 5: res construction workers + YoY
