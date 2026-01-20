@@ -673,15 +673,15 @@ let recessionRanges = [];
     document.getElementById("tile3note").textContent =
       "Inventory series is 'New One Family Homes for Sale' (thousands). Months supply is MSACSR. Recession shading is USREC.";
 
-    // -------------------------
-    // TILE 4: permits + YoY line
-    // -------------------------
-    const permits20 = permits;
-    const labels4 = permits20.map(o => fmtMonth.format(o.date));
-    const permitVals = permits20.map(o => o.value);
-    const yoyPermits = permits20.map((o, i) => (i >= 12) ? pctChange(o.value, permits20[i-12].value) : null);
+   // -------------------------
+// TILE 4: single-family starts + YoY line
+// -------------------------
+const starts20 = permits; // this variable holds HOUST1F right now (you named it permits earlier)
+const labels4 = starts20.map(o => fmtMonth.format(o.date));
+const startsVals = starts20.map(o => o.value);
+const yoyStarts = starts20.map((o, i) => (i >= 12) ? pctChange(o.value, starts20[i-12].value) : null);
 
-    charts.c4 = makeMixedBarLineChart("chart4", labels4, permitVals, yoyVals, {
+charts.c4 = makeMixedBarLineChart("chart4", labels4, startsVals, yoyStarts, {
   barLabel: "Single-family starts (SAAR)",
   lineLabel: "YoY % change",
   barAxisTitle: "Starts (SAAR)",
@@ -690,8 +690,8 @@ let recessionRanges = [];
   lineTick: (v) => fmtPct1.format(v) + "%"
 });
 
-    document.getElementById("tile4note").textContent =
-      "Starts series is HOUST1F (single-family starts, SAAR). YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
+document.getElementById("tile4note").textContent =
+  "Starts series is HOUST1F (single-family starts, SAAR). YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
 
     // -------------------------
     // TILE 5: res construction workers + YoY
