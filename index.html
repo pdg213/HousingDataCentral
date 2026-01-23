@@ -128,25 +128,7 @@
   <!-- KPI STRIP -->
   <div id="kpiGrid" class="kpiGrid"></div>
 
-  <!-- AI COMMENTARY -->
-  <div class="card" id="commentaryCard">
-    <h2 style="margin-top:0;">Commentary & Signals</h2>
-    <div id="insightsStatus" class="small">Loading commentary...</div>
-
-    <div style="margin:10px 0 0;">
-      <div class="pill" style="margin-right:6px;">Auto signals</div>
-      <span class="small">Derived from the latest deltas and thresholds.</span>
-      <ul id="signalsBullets" style="margin: 8px 0 0 18px;"></ul>
-    </div>
-
-    <h3 style="margin:12px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
-    <div id="buildersWrap"></div>
-
-    <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
-    <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
-
-    <div id="insightsErr" class="error"></div>
-  </div>
+  
 
   <!-- TILES CONTAINER -->
   <div id="tiles" class="grid"></div>
@@ -1331,6 +1313,26 @@ elReload.addEventListener("click", () => {
   reloadAll({ bypassCache: true });
 });
 
+<!-- AI COMMENTARY -->
+  <div class="card" id="commentaryCard">
+    <h2 style="margin-top:0;">Commentary & Signals</h2>
+    <div id="insightsStatus" class="small">Loading commentary...</div>
+
+    <div style="margin:10px 0 0;">
+      <div class="pill" style="margin-right:6px;">Auto signals</div>
+      <span class="small">Derived from the latest deltas and thresholds.</span>
+      <ul id="signalsBullets" style="margin: 8px 0 0 18px;"></ul>
+    </div>
+
+    <h3 style="margin:12px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
+    <div id="buildersWrap"></div>
+
+    <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
+    <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
+
+    <div id="insightsErr" class="error"></div>
+  </div>
+  
 /* =========================================================
    BOOT
 ========================================================= */
