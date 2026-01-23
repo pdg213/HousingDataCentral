@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"> 
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -68,7 +68,6 @@
     .card h2 { margin: 0 0 6px; font-size: 16px; }
     .meta { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
     .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
-    .row { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
     canvas { width: 100% !important; height: 280px !important; }
 
     .kpiCard h3{ margin:0 0 6px; font-size: 13px; color:#111; }
@@ -128,10 +127,28 @@
   <!-- KPI STRIP -->
   <div id="kpiGrid" class="kpiGrid"></div>
 
-  
-
   <!-- TILES CONTAINER -->
   <div id="tiles" class="grid"></div>
+
+  <!-- AI COMMENTARY (MOVED TO BOTTOM) -->
+  <div class="card" id="commentaryCard" style="margin-top:14px;">
+    <h2 style="margin-top:0;">Commentary & Signals</h2>
+    <div id="insightsStatus" class="small">Loading commentary...</div>
+
+    <div style="margin:10px 0 0;">
+      <div class="pill" style="margin-right:6px;">Auto signals</div>
+      <span class="small">Derived from the latest deltas and thresholds.</span>
+      <ul id="signalsBullets" style="margin: 8px 0 0 18px;"></ul>
+    </div>
+
+    <h3 style="margin:12px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
+    <div id="buildersWrap"></div>
+
+    <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
+    <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
+
+    <div id="insightsErr" class="error"></div>
+  </div>
 
 <script>
 /* =========================================================
@@ -140,43 +157,34 @@
 const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 const INSIGHTS_URL = PROXY_BASE.replace(/\/$/, "") + "/insights";
 
-// Series IDs
 const SERIES = {
-  PRICE_ZILLOW: "USAUCSFRCONDOSMSAMID",  // Zillow ZHVI (monthly)
-  MORTGAGE_30Y: "MORTGAGE30US",          // Freddie Mac weekly -> monthly avg
+  PRICE_ZILLOW: "USAUCSFRCONDOSMSAMID",
+  MORTGAGE_30Y: "MORTGAGE30US",
 
-  // Existing home sales + months supply (note: short history for EXHOSLUSM495S)
   EHS_SAAR: "EXHOSLUSM495S",
   EHS_MONTHS: "HOSSUPUSM673N",
 
-  // New home inventory + months supply
   NEW_INV: "HNFSEPUSSA",
   NEW_MONTHS: "MSACSR",
 
-  // Starts
   STARTS_SF: "HOUST1F",
 
-  // Labor
   RES_WORKERS: "CES2023610001",
 
-  // Macro
   SENTIMENT: "UMCSENT",
   UNRATE: "UNRATE",
 
-  // Recession shading
   USREC: "USREC"
 };
 
-// Local cache
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const CACHE_PREFIX = "fredcache_v2:";
 
-// Global thresholds (tweak as you like)
 const THRESH = {
-  STALE_MONTHLY_DAYS: 62,     // roughly 2 months
-  AFFORD_YOY_GOOD: 0,         // payment YoY < 0 = improving affordability
-  STARTS_YOY_STRONG: 10,      // strong starts growth
-  UNRATE_6M_RISE_WARN: 0.3    // +30bp over 6m
+  STALE_MONTHLY_DAYS: 62,
+  AFFORD_YOY_GOOD: 0,
+  STARTS_YOY_STRONG: 10,
+  UNRATE_6M_RISE_WARN: 0.3
 };
 
 /* =========================================================
@@ -194,7 +202,7 @@ const elDpLabel = document.getElementById("dpLabel");
 const elRefresh = document.getElementById("refreshBtn");
 const elReload = document.getElementById("reloadBtn");
 
-// Commentary DOM
+// Commentary DOM (now exists in body)
 const elInsightsStatus = document.getElementById("insightsStatus");
 const elInsightsErr = document.getElementById("insightsErr");
 const elBuildersWrap = document.getElementById("buildersWrap");
@@ -210,10 +218,8 @@ const fmtNum0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const fmt1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 function formatYM(ym){
-  // ym is "YYYY-MM"
   const [y,m] = ym.split("-");
-  const d = new Date(Number(y), Number(m)-1, 1);
-  return fmtMonth.format(d);
+  return fmtMonth.format(new Date(Number(y), Number(m)-1, 1));
 }
 
 /* =========================================================
@@ -239,11 +245,6 @@ function pctChange(curr, prev) {
   if (curr === null || prev === null || prev === 0) return null;
   return (curr / prev - 1) * 100;
 }
-function mean(arr) {
-  const clean = arr.filter(x => x !== null && x !== undefined);
-  if (!clean.length) return null;
-  return clean.reduce((a,b)=>a+b,0) / clean.length;
-}
 function rollingMA(values, window){
   if (!window || window <= 1) return values.slice();
   const out = [];
@@ -265,16 +266,16 @@ function lastIndexOfNonNull(arr){
   }
   return -1;
 }
-function toFixedOrDash(v, digits=1){
-  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  return Number(v).toFixed(digits);
-}
 function daysBetween(a, b){
   const ms = Math.abs(b.getTime() - a.getTime());
   return ms / (1000*60*60*24);
 }
-
-/* Loan payment formula (P&I): M = L * r / (1 - (1+r)^-n) */
+function computeYoYFromAligned(values, lag=12){
+  return values.map((v, i) => (i >= lag) ? pctChange(v, values[i-lag]) : null);
+}
+function changeOverN(values, n){
+  return values.map((v, i) => (i >= n && v !== null && values[i-n] !== null) ? (v - values[i-n]) : null);
+}
 function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
   if (loanAmount === null || annualRatePct === null) return null;
   const r = (annualRatePct / 100) / 12;
@@ -352,7 +353,6 @@ async function fetchSeries(seriesId, { bypassCache=false } = {}) {
   return obs;
 }
 
-/* Convert any frequency to monthly averages (e.g., weekly mortgage rate -> monthly) */
 function toMonthlyAverage(obs) {
   const bucket = new Map();
   for (const o of obs) {
@@ -377,34 +377,19 @@ function sliceWindow(obs, windowYears){
   return obs.filter(o => o.date >= start);
 }
 
-/* Union alignment on YYYY-MM; returns labels (YYYY-MM) + values arrays */
 function alignMonthlyUnion(seriesList) {
-  // seriesList: [{name, obs}] where obs is [{date,value}]
   const maps = seriesList.map(s => {
     const m = new Map();
     s.obs.forEach(o => m.set(monthKey(o.date), o.value));
     return m;
   });
 
-  // Collect union of keys
   const keySet = new Set();
   maps.forEach(m => m.forEach((_,k)=>keySet.add(k)));
   const keys = Array.from(keySet).sort();
-  // If you prefer a contiguous month sequence (no gaps), you can generate a full range.
-  // For monitoring, union is usually sufficient.
 
   const valuesBySeries = maps.map(m => keys.map(k => m.has(k) ? m.get(k) : null));
   return { keys, valuesBySeries };
-}
-
-/* YoY series from aligned monthly arrays */
-function computeYoYFromAligned(values, lag=12){
-  return values.map((v, i) => (i >= lag) ? pctChange(v, values[i-lag]) : null);
-}
-
-/* 6M change in level (e.g., UNRATE) */
-function changeOverN(values, n){
-  return values.map((v, i) => (i >= n && v !== null && values[i-n] !== null) ? (v - values[i-n]) : null);
 }
 
 /* =========================================================
@@ -420,14 +405,13 @@ function recessionRangesFromUSREC(usrecMonthlyObs) {
     const isRec = o.value >= 1;
     if (!inRec && isRec) { inRec = true; start = monthKey(o.date); }
     if (inRec && !isRec) {
-      const end = monthKey(o.date); // end month is first non-recession month; shading will stop before it
+      const end = monthKey(o.date);
       ranges.push({ startYM: start, endYM: end });
       inRec = false; start = null;
     }
   }
   if (inRec && start) {
     const last = monthKey(sorted[sorted.length - 1].date);
-    // Shade through last observed month + 1 "virtual end"
     const [y,m] = last.split("-");
     const end = new Date(Number(y), Number(m)-1, 1);
     end.setMonth(end.getMonth()+1);
@@ -457,8 +441,6 @@ function makeRecessionPlugin(getRanges) {
 
       for (const r of ranges) {
         if (!labelToIndex.has(r.startYM)) continue;
-
-        // endYM may be beyond chart labels; shade up to last label.
         const i0 = labelToIndex.get(r.startYM);
         const i1 = labelToIndex.has(r.endYM) ? labelToIndex.get(r.endYM) : (labels.length - 1);
 
@@ -476,9 +458,6 @@ function makeRecessionPlugin(getRanges) {
   };
 }
 
-/* =========================================================
-   "LATEST VALUE" LABEL PLUGIN (lightweight)
-========================================================= */
 function makeLatestLabelPlugin() {
   return {
     id: "latestLabel",
@@ -487,7 +466,6 @@ function makeLatestLabelPlugin() {
       const ds = chart.data.datasets || [];
       if (!ds.length) return;
 
-      // Label last non-null point of the LINE dataset if present; else bar.
       const lineIndex = ds.findIndex(d => d.type === "line");
       const idx = lineIndex >= 0 ? lineIndex : 0;
       const data = ds[idx].data || [];
@@ -538,9 +516,7 @@ function makeMixedBarLineChart(canvas, labelsYM, barData, lineData, opts) {
           tension: 0.15,
           pointRadius: 0,
           borderWidth: 2,
-          borderColor: "rgba(220, 90, 80, 0.95)",
-          // Decimation helps if you expand to MAX windows (especially weekly->monthly isn’t huge, but still)
-          segment: { },
+          borderColor: "rgba(220, 90, 80, 0.95)"
         }
       ]
     },
@@ -564,10 +540,7 @@ function makeMixedBarLineChart(canvas, labelsYM, barData, lineData, opts) {
         x: {
           ticks: {
             maxTicksLimit: 12,
-            callback: (val, idx) => {
-              const ym = labelsYM[idx];
-              return formatYM(ym);
-            }
+            callback: (val, idx) => formatYM(labelsYM[idx])
           }
         },
         yBar: {
@@ -587,20 +560,44 @@ function makeMixedBarLineChart(canvas, labelsYM, barData, lineData, opts) {
 }
 
 /* =========================================================
-   TILE DEFINITIONS (config-driven)
+   TILE DEFINITIONS
 ========================================================= */
+function lastUpdatedYM(labelsYM, values){
+  const i = lastIndexOfNonNull(values);
+  return i >= 0 ? labelsYM[i] : null;
+}
+function computeStaleness(updatedYM){
+  if (!updatedYM) return { level:"warn", text:"Staleness: —" };
+  const [y,m] = updatedYM.split("-");
+  const updatedDate = new Date(Number(y), Number(m)-1, 1);
+  const now = new Date();
+  const d = daysBetween(updatedDate, now);
+
+  if (d <= THRESH.STALE_MONTHLY_DAYS) return { level:"good", text:`Fresh (${Math.round(d)}d)` };
+  if (d <= THRESH.STALE_MONTHLY_DAYS * 1.7) return { level:"warn", text:`Stale (${Math.round(d)}d)` };
+  return { level:"bad", text:`Very stale (${Math.round(d)}d)` };
+}
+function setTileUpdateBadges(tileKey, updatedYM, staleness){
+  const upd = document.getElementById(`upd_${tileKey}`);
+  const stale = document.getElementById(`stale_${tileKey}`);
+  if (upd) upd.textContent = updatedYM ? `Updated: ${formatYM(updatedYM)}` : "Updated: —";
+  if (stale) {
+    stale.textContent = staleness ? staleness.text : "Staleness: —";
+    stale.style.borderColor = staleness.level === "good" ? "rgba(26,127,55,0.35)"
+                         : staleness.level === "bad"  ? "rgba(176,0,32,0.25)"
+                         : "rgba(154,106,0,0.35)";
+  }
+}
+
 const TILES = [
   {
     key: "t1_afford",
     title: "1) Median monthly payment (P&I) + 30Y mortgage rate",
     meta: "Bars = estimated monthly P&I payment (left axis). Line = 30Y mortgage rate (right axis).",
     pill: "Windowed",
-    expectsMonthly: true,
-    // Inputs: DP slider drives bar series; line is mortgage rate
-    build: (ctx) => {
-      const { labelsYM, series, state } = ctx;
-      const price = series.PRICE_ZILLOW;   // aligned to labelsYM
-      const rate = series.MORTGAGE_30Y_M;  // monthly avg aligned
+    build: ({ labelsYM, series, state }) => {
+      const price = series.PRICE_ZILLOW;
+      const rate = series.MORTGAGE_30Y_M;
 
       const payments = price.map((p, i) => {
         const r = rate[i];
@@ -622,15 +619,12 @@ const TILES = [
           barTick: (v) => "$" + fmtMoney0.format(v),
           lineTick: (v) => fmt1.format(v) + "%"
         },
-        note:
-          "Home price proxy: Zillow ZHVI (monthly, dollars). Mortgage rate: Freddie Mac weekly averaged to monthly. Recession shading: USREC."
+        note: "Home price proxy: Zillow ZHVI. Mortgage rate: Freddie Mac weekly averaged to monthly. Recession shading: USREC."
       };
     },
-    kpi: (ctx) => {
-      const { labelsYM, series, state } = ctx;
+    kpi: ({ labelsYM, series, state }) => {
       const price = series.PRICE_ZILLOW;
       const rate = series.MORTGAGE_30Y_M;
-
       const payments = price.map((p, i) => {
         const r = rate[i];
         if (p === null || r === null) return null;
@@ -639,17 +633,20 @@ const TILES = [
         return monthlyPayment(loan, r, 360);
       });
 
+      const latest = lastValue(payments);
+      const prev12 = payments.length >= 13 ? payments[payments.length-13] : null;
+      const yoy = pctChange(latest, prev12);
+
       return {
         name: "Affordability (P&I)",
-        value: lastValue(payments),
+        value: latest,
         valueFmt: (v) => v === null ? "—" : "$" + fmtMoney0.format(v),
-        yoy: pctChange(lastValue(payments), (payments.length >= 13 ? payments[payments.length-13] : null)),
+        yoy,
         yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
         updatedYM: lastUpdatedYM(labelsYM, payments),
-        tag: (v, yoy) => {
-          if (yoy !== null && yoy < THRESH.AFFORD_YOY_GOOD) return { text:"Improving YoY", cls:"good" };
-          return { text:"Watch rates/prices", cls:"warn" };
-        }
+        tag: (value, yoy) => (yoy !== null && yoy < THRESH.AFFORD_YOY_GOOD)
+          ? { text:"Improving YoY", cls:"good" }
+          : { text:"Watch rates/prices", cls:"warn" }
       };
     }
   },
@@ -658,84 +655,77 @@ const TILES = [
     title: "2) Existing Home Sales (SAAR) + Months Supply",
     meta: "Bars = existing home sales SAAR (left axis). Line = months supply (right axis).",
     pill: "Windowed (series-dependent history)",
-    expectsMonthly: true,
-    build: (ctx) => {
-      const { labelsYM, series } = ctx;
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.EHS_SAAR,
+      line: series.EHS_MONTHS,
+      chartOpts: {
+        barLabel: "Existing Home Sales (SAAR)",
+        lineLabel: "Months supply",
+        barAxisTitle: "Sales (SAAR, units)",
+        lineAxisTitle: "Months",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v)
+      },
+      note: "Note: some EHS series have short history. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.EHS_SAAR);
+      const prev12 = series.EHS_SAAR.length >= 13 ? series.EHS_SAAR[series.EHS_SAAR.length-13] : null;
+      const yoy = pctChange(v, prev12);
       return {
-        labelsYM,
-        bar: series.EHS_SAAR,
-        line: series.EHS_MONTHS,
-        chartOpts: {
-          barLabel: "Existing Home Sales (SAAR)",
-          lineLabel: "Months supply",
-          barAxisTitle: "Sales (SAAR, units)",
-          lineAxisTitle: "Months",
-          barTick: (v) => fmtNum0.format(v),
-          lineTick: (v) => fmt1.format(v)
-        },
-        note:
-          "Note: some FRED EHS series have short history (recent start). Recession shading: USREC."
+        name: "Existing Home Sales",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.EHS_SAAR),
+        tag: (_v, yy) => (yy !== null && yy > 0) ? { text:"Rising demand", cls:"good" } : { text:"Weak/flat", cls:"warn" }
       };
-    },
-    kpi: (ctx) => ({
-      name: "Existing Home Sales",
-      value: lastValue(ctx.series.EHS_SAAR),
-      valueFmt: (v) => v === null ? "—" : fmtNum0.format(v),
-      yoy: pctChange(lastValue(ctx.series.EHS_SAAR), (ctx.series.EHS_SAAR.length >= 13 ? ctx.series.EHS_SAAR[ctx.series.EHS_SAAR.length-13] : null)),
-      yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
-      updatedYM: lastUpdatedYM(ctx.labelsYM, ctx.series.EHS_SAAR),
-      tag: (v, yoy) => {
-        if (yoy !== null && yoy > 0) return { text:"Rising demand", cls:"good" };
-        return { text:"Weak/flat", cls:"warn" };
-      }
-    })
+    }
   },
   {
     key: "t3_newinv",
     title: "3) New Home Inventory + Months Supply (New Homes)",
     meta: "Bars = new homes for sale (left axis). Line = months supply (right axis).",
     pill: "Windowed",
-    expectsMonthly: true,
-    build: (ctx) => {
-      const { labelsYM, series } = ctx;
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.NEW_INV,
+      line: series.NEW_MONTHS,
+      chartOpts: {
+        barLabel: "New homes for sale (inventory)",
+        lineLabel: "Months supply (new homes)",
+        barAxisTitle: "Inventory (thousands)",
+        lineAxisTitle: "Months",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v)
+      },
+      note: "Inventory: HNFSEPUSSA (thousands). Months supply: MSACSR. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.NEW_MONTHS);
+      const prev12 = series.NEW_MONTHS.length >= 13 ? series.NEW_MONTHS[series.NEW_MONTHS.length-13] : null;
+      const yoy = pctChange(v, prev12);
       return {
-        labelsYM,
-        bar: series.NEW_INV,
-        line: series.NEW_MONTHS,
-        chartOpts: {
-          barLabel: "New homes for sale (inventory)",
-          lineLabel: "Months supply (new homes)",
-          barAxisTitle: "Inventory (thousands)",
-          lineAxisTitle: "Months",
-          barTick: (v) => fmtNum0.format(v),
-          lineTick: (v) => fmt1.format(v)
-        },
-        note:
-          "Inventory series: HNFSEPUSSA (thousands). Months supply: MSACSR. Recession shading: USREC."
+        name: "New Home Supply",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmt1.format(x) + " mo",
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.NEW_MONTHS),
+        tag: (x) => (x !== null && x >= 7) ? { text:"High supply", cls:"warn" }
+              : (x !== null && x <= 4.5) ? { text:"Tight supply", cls:"good" }
+              : { text:"Balanced", cls:"warn" }
       };
-    },
-    kpi: (ctx) => ({
-      name: "New Home Supply",
-      value: lastValue(ctx.series.NEW_MONTHS),
-      valueFmt: (v) => v === null ? "—" : fmt1.format(v) + " mo",
-      yoy: pctChange(lastValue(ctx.series.NEW_MONTHS), (ctx.series.NEW_MONTHS.length >= 13 ? ctx.series.NEW_MONTHS[ctx.series.NEW_MONTHS.length-13] : null)),
-      yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
-      updatedYM: lastUpdatedYM(ctx.labelsYM, ctx.series.NEW_MONTHS),
-      tag: (v) => {
-        if (v !== null && v >= 7) return { text:"High supply", cls:"warn" };
-        if (v !== null && v <= 4.5) return { text:"Tight supply", cls:"good" };
-        return { text:"Balanced", cls:"warn" };
-      }
-    })
+    }
   },
   {
     key: "t4_starts",
     title: "4) Single-Family Starts (SAAR) + YoY % (full line)",
     meta: "Bars = single-family starts SAAR (left axis). Line = YoY % change (right axis).",
     pill: "Windowed",
-    expectsMonthly: true,
-    build: (ctx) => {
-      const { labelsYM, series } = ctx;
+    build: ({ labelsYM, series }) => {
       const starts = series.STARTS_SF;
       const yoy = computeYoYFromAligned(starts, 12);
       return {
@@ -750,26 +740,23 @@ const TILES = [
           barTick: (v) => fmtNum0.format(v),
           lineTick: (v) => fmt1.format(v) + "%"
         },
-        note:
-          "Starts: HOUST1F (SAAR). YoY computed as t vs t-12. Recession shading: USREC."
+        note: "Starts: HOUST1F (SAAR). YoY computed as t vs t-12. Recession shading: USREC."
       };
     },
-    kpi: (ctx) => {
-      const starts = ctx.series.STARTS_SF;
+    kpi: ({ labelsYM, series }) => {
+      const starts = series.STARTS_SF;
       const yoy = computeYoYFromAligned(starts, 12);
       const latestYoY = lastValue(yoy);
       return {
         name: "Single-Family Starts",
         value: lastValue(starts),
-        valueFmt: (v) => v === null ? "—" : fmtNum0.format(v),
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
         yoy: latestYoY,
-        yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
-        updatedYM: lastUpdatedYM(ctx.labelsYM, starts),
-        tag: (v, yoy) => {
-          if (yoy !== null && yoy >= THRESH.STARTS_YOY_STRONG) return { text:"Strong growth", cls:"good" };
-          if (yoy !== null && yoy < 0) return { text:"Contracting", cls:"warn" };
-          return { text:"Mixed", cls:"warn" };
-        }
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, starts),
+        tag: (_v, yy) => (yy !== null && yy >= THRESH.STARTS_YOY_STRONG) ? { text:"Strong growth", cls:"good" }
+             : (yy !== null && yy < 0) ? { text:"Contracting", cls:"warn" }
+             : { text:"Mixed", cls:"warn" }
       };
     }
   },
@@ -778,9 +765,7 @@ const TILES = [
     title: "5) Residential construction workers + YoY %",
     meta: "Bars = residential construction employees (left axis). Line = YoY % change (right axis).",
     pill: "Windowed",
-    expectsMonthly: true,
-    build: (ctx) => {
-      const { labelsYM, series } = ctx;
+    build: ({ labelsYM, series }) => {
       const workers = series.RES_WORKERS;
       const yoy = computeYoYFromAligned(workers, 12);
       return {
@@ -795,63 +780,59 @@ const TILES = [
           barTick: (v) => fmtNum0.format(v),
           lineTick: (v) => fmt1.format(v) + "%"
         },
-        note:
-          "Bars: CES2023610001 (residential construction employment). Line: YoY % change. Recession shading: USREC."
+        note: "Bars: CES2023610001. Line: YoY % change. Recession shading: USREC."
       };
     },
-    kpi: (ctx) => ({
-      name: "Res. Construction Jobs",
-      value: lastValue(ctx.series.RES_WORKERS),
-      valueFmt: (v) => v === null ? "—" : fmtNum0.format(v),
-      yoy: pctChange(lastValue(ctx.series.RES_WORKERS), (ctx.series.RES_WORKERS.length >= 13 ? ctx.series.RES_WORKERS[ctx.series.RES_WORKERS.length-13] : null)),
-      yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
-      updatedYM: lastUpdatedYM(ctx.labelsYM, ctx.series.RES_WORKERS),
-      tag: (v, yoy) => {
-        if (yoy !== null && yoy > 0) return { text:"Hiring", cls:"good" };
-        if (yoy !== null && yoy < 0) return { text:"Softening", cls:"warn" };
-        return { text:"Flat", cls:"warn" };
-      }
-    })
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.RES_WORKERS);
+      const prev12 = series.RES_WORKERS.length >= 13 ? series.RES_WORKERS[series.RES_WORKERS.length-13] : null;
+      const yoy = pctChange(v, prev12);
+      return {
+        name: "Res. Construction Jobs",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.RES_WORKERS),
+        tag: (_v, yy) => (yy !== null && yy > 0) ? { text:"Hiring", cls:"good" }
+             : (yy !== null && yy < 0) ? { text:"Softening", cls:"warn" }
+             : { text:"Flat", cls:"warn" }
+      };
+    }
   },
   {
     key: "t6_macro",
     title: "6) Consumer sentiment + Unemployment rate",
     meta: "Bars = consumer sentiment (left axis). Line = unemployment rate (right axis).",
     pill: "Windowed",
-    expectsMonthly: true,
-    build: (ctx) => {
-      const { labelsYM, series } = ctx;
-      return {
-        labelsYM,
-        bar: series.SENTIMENT,
-        line: series.UNRATE,
-        chartOpts: {
-          barLabel: "Consumer sentiment (UMCSENT)",
-          lineLabel: "Unemployment rate (UNRATE)",
-          barAxisTitle: "Sentiment index",
-          lineAxisTitle: "Unemployment (%)",
-          barTick: (v) => fmtNum0.format(v),
-          lineTick: (v) => fmt1.format(v) + "%"
-        },
-        note:
-          "Bars: UMCSENT. Line: UNRATE. Recession shading: USREC."
-      };
-    },
-    kpi: (ctx) => {
-      const un = ctx.series.UNRATE;
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.SENTIMENT,
+      line: series.UNRATE,
+      chartOpts: {
+        barLabel: "Consumer sentiment (UMCSENT)",
+        lineLabel: "Unemployment rate (UNRATE)",
+        barAxisTitle: "Sentiment index",
+        lineAxisTitle: "Unemployment (%)",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v) + "%"
+      },
+      note: "Bars: UMCSENT. Line: UNRATE. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const un = series.UNRATE;
       const un6m = changeOverN(un, 6);
       const latest6m = lastValue(un6m);
       return {
         name: "Macro (Unemployment)",
         value: lastValue(un),
-        valueFmt: (v) => v === null ? "—" : fmt1.format(v) + "%",
+        valueFmt: (x) => x === null ? "—" : fmt1.format(x) + "%",
         yoy: latest6m,
-        yoyFmt: (v) => v === null ? "—" : ( (v>=0?"+":"") + fmt1.format(v) + " pp (6m)" ),
-        updatedYM: lastUpdatedYM(ctx.labelsYM, un),
-        tag: (v, d6m) => {
-          if (d6m !== null && d6m >= THRESH.UNRATE_6M_RISE_WARN) return { text:"Rising jobless", cls:"warn" };
-          return { text:"Stable labor", cls:"good" };
-        }
+        yoyFmt: (x) => x === null ? "—" : ((x>=0?"+":"") + fmt1.format(x) + " pp (6m)"),
+        updatedYM: lastUpdatedYM(labelsYM, un),
+        tag: (_v, d6m) => (d6m !== null && d6m >= THRESH.UNRATE_6M_RISE_WARN)
+          ? { text:"Rising jobless", cls:"warn" }
+          : { text:"Stable labor", cls:"good" }
       };
     }
   }
@@ -861,17 +842,15 @@ const TILES = [
    STATE + CHARTS
 ========================================================= */
 const state = {
-  window: elRange.value,           // "5" | "10" | "20" | "30" | "MAX"
-  smooth: Number(elSmooth.value),  // 0 | 3 | 6
-  dpPct: Number(elDp.value),
-  bypassCache: false
+  window: elRange.value,
+  smooth: Number(elSmooth.value),
+  dpPct: Number(elDp.value)
 };
 
 let chartsByKey = new Map();
 let recessionRanges = [];
-let rawMonthly = {};   // raw monthly-aligned arrays by name
-let labelsYMAll = [];  // master labels union across all included series (within selected window)
-let lastLoadInfo = {};
+let rawMonthly = {};
+let labelsYMAll = [];
 
 /* =========================================================
    UI BUILDERS
@@ -948,35 +927,6 @@ function renderKpis(kpiObjects){
   });
 }
 
-function setTileUpdateBadges(tileKey, updatedYM, staleness){
-  const upd = document.getElementById(`upd_${tileKey}`);
-  const stale = document.getElementById(`stale_${tileKey}`);
-  if (upd) upd.textContent = updatedYM ? `Updated: ${formatYM(updatedYM)}` : "Updated: —";
-  if (stale) {
-    stale.textContent = staleness ? staleness.text : "Staleness: —";
-    stale.style.borderColor = staleness.level === "good" ? "rgba(26,127,55,0.35)"
-                         : staleness.level === "bad"  ? "rgba(176,0,32,0.25)"
-                         : "rgba(154,106,0,0.35)";
-  }
-}
-
-function lastUpdatedYM(labelsYM, values){
-  const i = lastIndexOfNonNull(values);
-  return i >= 0 ? labelsYM[i] : null;
-}
-
-function computeStaleness(updatedYM){
-  if (!updatedYM) return { level:"warn", text:"Staleness: —" };
-  const [y,m] = updatedYM.split("-");
-  const updatedDate = new Date(Number(y), Number(m)-1, 1);
-  const now = new Date();
-  const d = daysBetween(updatedDate, now);
-
-  if (d <= THRESH.STALE_MONTHLY_DAYS) return { level:"good", text:`Fresh (${Math.round(d)}d)` };
-  if (d <= THRESH.STALE_MONTHLY_DAYS * 1.7) return { level:"warn", text:`Stale (${Math.round(d)}d)` };
-  return { level:"bad", text:`Very stale (${Math.round(d)}d)` };
-}
-
 /* =========================================================
    COMMENTARY (external + auto signals)
 ========================================================= */
@@ -1026,6 +976,7 @@ async function fetchInsights({ bypassCache=false } = {}) {
 }
 
 function renderAutoSignals(kpis){
+  if (!elSignalsBullets) return;
   elSignalsBullets.innerHTML = "";
   const byName = new Map(kpis.map(k => [k.name, k]));
 
@@ -1044,7 +995,6 @@ function renderAutoSignals(kpis){
         : `Affordability still tightening: estimated P&I payment is ${fmt1.format(aff.yoy)}% YoY (up).`
     );
   }
-
   if (starts && starts.yoy !== null){
     bullets.push(
       starts.yoy >= THRESH.STARTS_YOY_STRONG
@@ -1052,7 +1002,6 @@ function renderAutoSignals(kpis){
         : `Starts signal is mixed: single-family starts are ${fmt1.format(starts.yoy)}% YoY.`
     );
   }
-
   if (ehs && ehs.yoy !== null){
     bullets.push(
       ehs.yoy > 0
@@ -1060,7 +1009,6 @@ function renderAutoSignals(kpis){
         : `Resale demand soft/flat: existing home sales are ${fmt1.format(ehs.yoy)}% YoY.`
     );
   }
-
   if (un && un.yoy !== null){
     bullets.push(
       un.yoy >= THRESH.UNRATE_6M_RISE_WARN
@@ -1068,7 +1016,6 @@ function renderAutoSignals(kpis){
         : `Labor market stable: unemployment change over 6 months is ${un.yoy>=0?"+":""}${fmt1.format(un.yoy)} pp.`
     );
   }
-
   if (supply && supply.value !== null){
     bullets.push(
       supply.value >= 7
@@ -1078,7 +1025,6 @@ function renderAutoSignals(kpis){
   }
 
   if (!bullets.length) bullets.push("Signals unavailable (insufficient data history for selected window).");
-
   bullets.forEach(b => elSignalsBullets.appendChild(mk("li", {}, b)));
 }
 
@@ -1086,7 +1032,6 @@ function renderAutoSignals(kpis){
    DATA LOAD + RENDER PIPELINE
 ========================================================= */
 async function loadAllSeries({ bypassCache=false } = {}) {
-  // Fetch raw series
   const [
     priceRaw,
     mortWeeklyRaw,
@@ -1113,12 +1058,9 @@ async function loadAllSeries({ bypassCache=false } = {}) {
     fetchSeries(SERIES.USREC, { bypassCache })
   ]);
 
-  // Convert weekly mortgage rate to monthly average first
-  const mortMonthlyRaw = toMonthlyAverage(mortWeeklyRaw);
-
   return {
     PRICE_ZILLOW: priceRaw,
-    MORTGAGE_30Y_M: mortMonthlyRaw,
+    MORTGAGE_30Y_M: toMonthlyAverage(mortWeeklyRaw),
     EHS_SAAR: ehsRaw,
     EHS_MONTHS: ehsMonthsRaw,
     NEW_INV: newInvRaw,
@@ -1132,7 +1074,6 @@ async function loadAllSeries({ bypassCache=false } = {}) {
 }
 
 function buildMonthlyAligned(seriesObsByName, window){
-  // slice window, then union-align across all series used in tiles (and USREC)
   const sliced = {};
   Object.entries(seriesObsByName).forEach(([name, obs]) => {
     sliced[name] = sliceWindow(obs, window);
@@ -1145,9 +1086,7 @@ function buildMonthlyAligned(seriesObsByName, window){
   const values = aligned.valuesBySeries;
 
   const out = { labelsYM };
-  seriesList.forEach((s, idx) => {
-    out[s.name] = values[idx];
-  });
+  seriesList.forEach((s, idx) => { out[s.name] = values[idx]; });
   return out;
 }
 
@@ -1162,21 +1101,16 @@ function applySmoothing(seriesAligned, smoothWindow){
 }
 
 function renderAll(){
-  // Render KPIs + tiles from monthly-aligned series (already smoothed if selected)
   const labelsYM = labelsYMAll;
   const series = rawMonthly;
 
-  // Global chart plugins (register once)
-  // id collisions are okay if register is id-unique; we keep these stable.
   if (!Chart.registry.plugins.get("recessionShading")) Chart.register(makeRecessionPlugin(() => recessionRanges));
   if (!Chart.registry.plugins.get("latestLabel")) Chart.register(makeLatestLabelPlugin());
 
-  // Build KPIs
   const kpis = TILES.map(t => t.kpi({ labelsYM, series, state })).filter(Boolean);
   renderKpis(kpis);
   renderAutoSignals(kpis);
 
-  // Build tiles
   TILES.forEach(tile => {
     const cv = document.getElementById(`cv_${tile.key}`);
     const noteEl = document.getElementById(`note_${tile.key}`);
@@ -1192,24 +1126,15 @@ function renderAll(){
     try {
       const built = tile.build({ labelsYM, series, state });
 
-      // Staleness badge based on bar series (monitoring-first) if available else line
       const updatedYM = lastUpdatedYM(built.labelsYM, built.bar) || lastUpdatedYM(built.labelsYM, built.line);
       const staleness = computeStaleness(updatedYM);
       setTileUpdateBadges(tile.key, updatedYM, staleness);
 
-      // Destroy existing chart if present
       const existing = chartsByKey.get(tile.key);
-      if (existing) {
-        existing.destroy();
-        chartsByKey.delete(tile.key);
-      }
+      if (existing) { existing.destroy(); chartsByKey.delete(tile.key); }
 
-      // Build chart (apply smoothing to displayed series too; smoothing already applied globally to base series,
-      // but derived series (payments, yoy) should be smoothed optionally as well).
       let barData = built.bar.slice();
       let lineData = built.line.slice();
-
-      // Apply smoothing to derived series only if user selected smoothing (helps readability)
       if (state.smooth && state.smooth > 1) {
         barData = rollingMA(barData, state.smooth);
         lineData = rollingMA(lineData, state.smooth);
@@ -1220,7 +1145,6 @@ function renderAll(){
 
       noteEl.textContent = built.note || "";
 
-      // Optional lag message for short-history series
       if (lagEl) {
         const nonNullCount = barData.filter(v => v !== null && v !== undefined).length;
         if (nonNullCount < 36) lagEl.textContent = "Short history: plotting all available observations.";
@@ -1242,34 +1166,23 @@ async function reloadAll({ bypassCache=false } = {}) {
   elReload.disabled = true;
 
   try {
-    // 1) Fetch raw observations
     const obs = await loadAllSeries({ bypassCache });
 
-    // 2) USREC recession shading (use same window)
-    const usrecWindowed = sliceWindow(toMonthlyAverage(obs.USREC), state.window); // USREC is monthly already, but safe
+    const usrecWindowed = sliceWindow(obs.USREC, state.window);
     recessionRanges = recessionRangesFromUSREC(usrecWindowed);
 
-    // 3) Monthly union alignment for all series within window
     const monthlyAligned = buildMonthlyAligned(obs, state.window);
-
-    // 4) Base smoothing (applied to the underlying series arrays)
     const smoothed = applySmoothing(monthlyAligned, state.smooth);
 
     labelsYMAll = smoothed.labelsYM;
     rawMonthly = smoothed;
 
-    // 5) Commentary fetch (external) + derived signals
     fetchInsights({ bypassCache });
-
-    // 6) Render
     renderAll();
 
-    // Status line with freshness summary
     const latestYM = labelsYMAll.length ? labelsYMAll[labelsYMAll.length-1] : null;
     elStatusText.innerHTML =
       `<span class="ok">Loaded</span> ${Object.keys(obs).length} series. Window: <b>${state.window}</b>. Latest month on x-axis: <b>${latestYM ? formatYM(latestYM) : "—"}</b>.`;
-
-    lastLoadInfo = { at: new Date(), bypassCache };
 
   } catch (e) {
     elStatusText.textContent = "Could not load data.";
@@ -1299,8 +1212,6 @@ elDp.addEventListener("input", () => {
   if (!Number.isFinite(state.dpPct)) state.dpPct = 20;
   state.dpPct = Math.max(0, Math.min(50, state.dpPct));
   elDpLabel.textContent = state.dpPct + "%";
-
-  // No need to refetch data; just rerender
   renderAll();
 });
 
@@ -1313,26 +1224,6 @@ elReload.addEventListener("click", () => {
   reloadAll({ bypassCache: true });
 });
 
-<!-- AI COMMENTARY -->
-  <div class="card" id="commentaryCard">
-    <h2 style="margin-top:0;">Commentary & Signals</h2>
-    <div id="insightsStatus" class="small">Loading commentary...</div>
-
-    <div style="margin:10px 0 0;">
-      <div class="pill" style="margin-right:6px;">Auto signals</div>
-      <span class="small">Derived from the latest deltas and thresholds.</span>
-      <ul id="signalsBullets" style="margin: 8px 0 0 18px;"></ul>
-    </div>
-
-    <h3 style="margin:12px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
-    <div id="buildersWrap"></div>
-
-    <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
-    <ul id="marketBullets" style="margin: 8px 0 0 18px;"></ul>
-
-    <div id="insightsErr" class="error"></div>
-  </div>
-  
 /* =========================================================
    BOOT
 ========================================================= */
