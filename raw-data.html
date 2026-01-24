@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Raw Data - Housing Data Central</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --primary:#3c78c8;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+
+    .btn-group { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+    .series-btn {
+      padding:10px 16px; border:1px solid var(--border); border-radius:8px;
+      background:#fff; cursor:pointer; font-size:13px; transition: all 0.15s;
+    }
+    .series-btn:hover { border-color: var(--primary); }
+    .series-btn.active { background: var(--primary); color:#fff; border-color: var(--primary); }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+    .chart-container { height: 300px; margin-bottom: 16px; }
+    canvas { width: 100% !important; height: 100% !important; }
+
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    th { background:#f9f9f9; font-weight:600; text-align:right; }
+    th:first-child, td:first-child { text-align:left; }
+    tr:hover { background:#f5f8fc; }
+    .positive { color:#1a7f37; }
+    .negative { color:#b00020; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--card); box-shadow: var(--shadow); }
+    .error { color: #b00020; }
+    .loading { color: var(--muted); }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>Raw Data Explorer</h1>
+    <a href="index.html" class="back-btn">Back to Dashboard</a>
+  </div>
+  <p class="sub">Select a data series to view the last 24 data points with year-over-year and quarter-over-quarter changes.</p>
+
+  <div class="status" id="statusBox">
+    <span class="loading">Select a series below to load data...</span>
+  </div>
+
+  <div class="btn-group" id="seriesButtons"></div>
+
+  <div class="card" id="chartCard" style="display:none;">
+    <h2 id="chartTitle">Chart</h2>
+    <div class="chart-container">
+      <canvas id="dataChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card" id="tableCard" style="display:none;">
+    <h2 id="tableTitle">Data Table</h2>
+    <div style="overflow-x:auto;">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Value</th>
+            <th>Y/Y Change</th>
+            <th>Q/Q Change (3mo avg)</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
+
+const SERIES_CONFIG = [
+  { id: "USAUCSFRCONDOSMSAMID", name: "Home Values (Zillow ZHVI)", unit: "$", decimals: 0 },
+  { id: "MORTGAGE30US", name: "30Y Mortgage Rate", unit: "%", decimals: 2 },
+  { id: "EXHOSLUSM495S", name: "Existing Home Sales (SAAR)", unit: "K", decimals: 0 },
+  { id: "HOSSUPUSM673N", name: "Existing Home Months Supply", unit: "mo", decimals: 1 },
+  { id: "HNFSEPUSSA", name: "New Homes for Sale", unit: "K", decimals: 0 },
+  { id: "MSACSR", name: "New Homes Months Supply", unit: "mo", decimals: 1 },
+  { id: "HOUST1F", name: "Single-Family Starts (SAAR)", unit: "K", decimals: 0 },
+  { id: "CES2023610001", name: "Residential Construction Workers", unit: "K", decimals: 0 },
+  { id: "UMCSENT", name: "Consumer Sentiment", unit: "", decimals: 1 },
+  { id: "UNRATE", name: "Unemployment Rate", unit: "%", decimals: 1 }
+];
+
+let currentChart = null;
+let currentSeries = null;
+
+const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+
+function parseFredValue(v) {
+  if (v === "." || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ymdToDate(s) { return new Date(s + "T00:00:00"); }
+
+function monthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function toMonthlyAverage(obs) {
+  const bucket = new Map();
+  for (const o of obs) {
+    const k = monthKey(o.date);
+    const cur = bucket.get(k) || { sum: 0, count: 0, date: new Date(o.date.getFullYear(), o.date.getMonth(), 1) };
+    cur.sum += o.value;
+    cur.count += 1;
+    bucket.set(k, cur);
+  }
+  return Array.from(bucket.values())
+    .map(v => ({ date: v.date, value: v.sum / v.count }))
+    .sort((a,b) => a.date - b.date);
+}
+
+async function fetchSeries(seriesId) {
+  const url = new URL(PROXY_BASE);
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("file_type", "json");
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`${seriesId} failed (${resp.status}). Response:\n${txt}`);
+  }
+  const data = await resp.json();
+
+  if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response shape.`);
+  const obs = data.observations
+    .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+    .filter(o => o.value !== null)
+    .sort((a, b) => a.date - b.date);
+
+  if (!obs.length) throw new Error(`${seriesId}: no observations after filtering.`);
+  return obs;
+}
+
+function calculateChanges(data) {
+  const result = [];
+  const monthly = toMonthlyAverage(data);
+  
+  for (let i = 0; i < monthly.length; i++) {
+    const current = monthly[i];
+    let yoyChange = null;
+    let qoqChange = null;
+
+    if (i >= 12) {
+      const yearAgo = monthly[i - 12].value;
+      if (yearAgo !== 0) {
+        yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
+      }
+    }
+
+    if (i >= 3) {
+      const curr3mo = (monthly[i].value + monthly[i-1].value + monthly[i-2].value) / 3;
+      if (i >= 6) {
+        const prev3mo = (monthly[i-3].value + monthly[i-4].value + monthly[i-5].value) / 3;
+        if (prev3mo !== 0) {
+          qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
+        }
+      }
+    }
+
+    result.push({
+      date: current.date,
+      value: current.value,
+      yoyChange,
+      qoqChange
+    });
+  }
+
+  return result.slice(-24);
+}
+
+function formatValue(value, config) {
+  if (value === null) return "N/A";
+  const formatted = value.toLocaleString('en-US', { 
+    minimumFractionDigits: config.decimals, 
+    maximumFractionDigits: config.decimals 
+  });
+  if (config.unit === "$") return "$" + formatted;
+  if (config.unit === "%") return formatted + "%";
+  if (config.unit === "K") return formatted + "K";
+  if (config.unit === "mo") return formatted + " mo";
+  return formatted;
+}
+
+function formatChange(value) {
+  if (value === null) return '<span style="color:var(--muted)">N/A</span>';
+  const sign = value >= 0 ? "+" : "";
+  const cls = value >= 0 ? "positive" : "negative";
+  return `<span class="${cls}">${sign}${value.toFixed(1)}%</span>`;
+}
+
+function renderTable(data, config) {
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = "";
+
+  data.forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${fmtMonth.format(row.date)}</td>
+      <td>${formatValue(row.value, config)}</td>
+      <td>${formatChange(row.yoyChange)}</td>
+      <td>${formatChange(row.qoqChange)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderChart(data, config) {
+  const ctx = document.getElementById("dataChart");
+  
+  if (currentChart) {
+    currentChart.destroy();
+  }
+
+  const labels = data.map(d => fmtMonth.format(d.date));
+  const values = data.map(d => d.value);
+  const yoyChanges = data.map(d => d.yoyChange);
+
+  currentChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: config.name,
+          data: values,
+          yAxisID: "yBar",
+          backgroundColor: "rgba(60, 120, 200, 0.45)",
+          borderColor: "rgba(60, 120, 200, 0.85)",
+          borderWidth: 1
+        },
+        {
+          type: "line",
+          label: "Y/Y Change (%)",
+          data: yoyChanges,
+          yAxisID: "yLine",
+          tension: 0.15,
+          pointRadius: 0,
+          borderWidth: 2,
+          borderColor: "rgba(220, 90, 80, 0.95)"
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        yBar: {
+          position: "left",
+          title: { display: true, text: config.name }
+        },
+        yLine: {
+          position: "right",
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: "Y/Y Change (%)" },
+          ticks: { callback: (v) => v.toFixed(1) + "%" }
+        }
+      }
+    }
+  });
+}
+
+async function loadSeries(seriesId) {
+  const config = SERIES_CONFIG.find(s => s.id === seriesId);
+  const statusBox = document.getElementById("statusBox");
+  const chartCard = document.getElementById("chartCard");
+  const tableCard = document.getElementById("tableCard");
+  
+  statusBox.innerHTML = '<span class="loading">Loading data...</span>';
+  chartCard.style.display = "none";
+  tableCard.style.display = "none";
+
+  document.querySelectorAll(".series-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.id === seriesId);
+  });
+
+  try {
+    const rawData = await fetchSeries(seriesId);
+    const processedData = calculateChanges(rawData);
+
+    document.getElementById("chartTitle").textContent = config.name + " (Last 24 Months)";
+    document.getElementById("tableTitle").textContent = config.name + " - Data Table";
+
+    renderChart(processedData, config);
+    renderTable(processedData, config);
+
+    chartCard.style.display = "block";
+    tableCard.style.display = "block";
+    statusBox.innerHTML = `<span class="ok" style="color:#1a7f37;">Loaded ${config.name} - showing last 24 data points</span>`;
+    currentSeries = seriesId;
+
+  } catch (err) {
+    statusBox.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+    console.error(err);
+  }
+}
+
+function init() {
+  const btnGroup = document.getElementById("seriesButtons");
+  
+  SERIES_CONFIG.forEach(series => {
+    const btn = document.createElement("button");
+    btn.className = "series-btn";
+    btn.textContent = series.name;
+    btn.dataset.id = series.id;
+    btn.addEventListener("click", () => loadSeries(series.id));
+    btnGroup.appendChild(btn);
+  });
+}
+
+init();
+</script>
+
+</body>
+</html>
