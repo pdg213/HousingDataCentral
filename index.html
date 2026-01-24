@@ -15,13 +15,45 @@
       --bg:#ffffff;
       --card:#ffffff;
       --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --good:#1a7f37;
+      --bad:#b00020;
+      --warn:#9a6a00;
+      --pill:#fafafa;
     }
+    * { box-sizing: border-box; }
     body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
     h1 { margin: 0 0 6px; font-size: 22px; }
-    .sub { color: var(--muted); margin: 0 0 16px; }
-    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px; margin: 14px 0 18px; background: var(--card); box-shadow: var(--shadow); }
-    .ok { color: #1a7f37; }
-    .error { color: #b00020; white-space: pre-wrap; margin-top: 8px; }
+    .sub { color: var(--muted); margin: 0 0 12px; }
+
+    .topbar{
+      display:flex; gap:12px; flex-wrap: wrap; align-items:center;
+      margin: 10px 0 12px;
+    }
+    .topbar .group{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
+    label { font-size: 12.5px; color: var(--muted); }
+    select, input[type="number"], button{
+      padding: 7px 9px; border:1px solid var(--border); border-radius:10px; background:#fff;
+      font-size: 13px;
+    }
+    button{ cursor:pointer; }
+    button:disabled{ opacity:0.55; cursor:not-allowed; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px 14px; margin: 10px 0 14px; background: var(--card); box-shadow: var(--shadow); }
+    .ok { color: var(--good); }
+    .warn { color: var(--warn); }
+    .error { color: var(--bad); white-space: pre-wrap; margin-top: 8px; }
+
+    .pill { display:inline-block; padding:3px 8px; border:1px solid var(--border); border-radius: 999px; font-size: 12px; color:#333; background: var(--pill); }
+    .small { font-size: 12.5px; color: var(--muted); }
+
+    .kpiGrid{
+      display:grid; gap:12px;
+      grid-template-columns: 1fr;
+      margin: 12px 0 14px;
+    }
+    @media (min-width: 900px) {
+      .kpiGrid{ grid-template-columns: repeat(3, 1fr); }
+    }
 
     .grid {
       display: grid;
@@ -36,30 +68,80 @@
     .card h2 { margin: 0 0 6px; font-size: 16px; }
     .meta { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
     .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
-    .row { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
-    label { font-size: 12.5px; color: var(--muted); }
-    input[type="number"]{ padding: 7px 9px; border:1px solid var(--border); border-radius:10px; width: 160px; }
     canvas { width: 100% !important; height: 280px !important; }
-    .small { font-size: 12.5px; color: var(--muted); }
-    .pill { display:inline-block; padding:3px 8px; border:1px solid var(--border); border-radius: 999px; font-size: 12px; color:#333; background:#fafafa; }
+
+    .kpiCard h3{ margin:0 0 6px; font-size: 13px; color:#111; }
+    .kpiMain{ display:flex; justify-content: space-between; align-items: baseline; gap:10px; }
+    .kpiValue{ font-size: 20px; font-weight: 700; }
+    .kpiDelta{ font-size: 12.5px; color: var(--muted); }
+    .kpiFooter{ display:flex; justify-content: space-between; align-items:center; gap:8px; margin-top: 8px; }
+    .kpiTag{ font-size: 12px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; background: var(--pill); color:#333; }
+    .kpiTag.good{ border-color: rgba(26,127,55,0.35); }
+    .kpiTag.warn{ border-color: rgba(154,106,0,0.35); }
+    .kpiTag.bad{ border-color: rgba(176,0,32,0.25); }
+
+    .tileErr{ margin-top: 8px; color: var(--bad); white-space: pre-wrap; font-size: 12.5px; }
+    .tileStatus{ display:flex; justify-content: space-between; align-items:center; gap:10px; margin: 6px 0 10px; flex-wrap: wrap; }
+    .tileStatus .left{ display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
   </style>
 </head>
 
 <body>
   <h1>Housing Dashboard</h1>
-  <p class="sub">Six-tile landing page pulling public series from FRED via your Cloudflare proxy.</p>
+  <p class="sub">Single-file dashboard pulling public series from FRED via your Cloudflare proxy. Includes KPI monitoring, global controls, staleness detection, per-tile error isolation, and recession shading.</p>
+
+  <div class="topbar">
+    <div class="group">
+      <label for="rangeSelect">Window</label>
+      <select id="rangeSelect">
+        <option value="5">5Y</option>
+        <option value="10">10Y</option>
+        <option value="20" selected>20Y</option>
+        <option value="30">30Y</option>
+        <option value="MAX">MAX</option>
+      </select>
+
+      <label for="smoothSelect">Smoothing</label>
+      <select id="smoothSelect">
+        <option value="0" selected>None</option>
+        <option value="3">3M MA</option>
+        <option value="6">6M MA</option>
+      </select>
+
+      <label for="dpRange">Down payment (Tile 1)</label>
+      <input id="dpRange" type="range" min="0" max="50" step="1" value="20" style="width:220px;" />
+      <span id="dpLabel" class="pill">20%</span>
+    </div>
+
+    <div class="group">
+      <button id="refreshBtn">Refresh (clear local cache)</button>
+      <button id="reloadBtn">Reload data</button>
+    </div>
+  </div>
 
   <div class="status">
     <div id="statusText">Loading…</div>
     <div id="errText" class="error"></div>
   </div>
 
-  <!-- AI COMMENTARY -->
-  <div class="card">
-    <h2 style="margin-top:0;">AI Commentary (auto)</h2>
-    <div id="insightsStatus">Loading commentary...</div>
+  <!-- KPI STRIP -->
+  <div id="kpiGrid" class="kpiGrid"></div>
 
-    <h3 style="margin:10px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
+  <!-- TILES CONTAINER -->
+  <div id="tiles" class="grid"></div>
+
+  <!-- AI COMMENTARY (MOVED TO BOTTOM) -->
+  <div class="card" id="commentaryCard" style="margin-top:14px;">
+    <h2 style="margin-top:0;">Commentary & Signals</h2>
+    <div id="insightsStatus" class="small">Loading commentary...</div>
+
+    <div style="margin:10px 0 0;">
+      <div class="pill" style="margin-right:6px;">Auto signals</div>
+      <span class="small">Derived from the latest deltas and thresholds.</span>
+      <ul id="signalsBullets" style="margin: 8px 0 0 18px;"></ul>
+    </div>
+
+    <h3 style="margin:12px 0 6px; font-size:14px;">Builders (3 bullets each)</h3>
     <div id="buildersWrap"></div>
 
     <h3 style="margin:12px 0 6px; font-size:14px;">New home market (latest data)</h3>
@@ -68,203 +150,81 @@
     <div id="insightsErr" class="error"></div>
   </div>
 
-  <!-- TILES -->
-  <div class="grid">
-    <!-- TILE 1 -->
-    <div class="card">
-      <h2>1) Median monthly payment (P&I) + 30Y mortgage rate</h2>
-      <p class="meta">
-        Bars = estimated monthly P&I payment (left axis). Line = 30Y mortgage rate (right axis).
-        <span class="pill">20Y window</span>
-      </p>
-
-      <div class="row" style="margin-bottom:10px;">
-        <label for="downPaymentPct">Down payment</label>
-        <input id="downPaymentPct" type="range" min="0" max="50" step="1" value="20" style="width:220px;" />
-        <span id="dpPctLabel" class="pill">20%</span>
-        <span id="dpHint" class="small" style="margin-left:6px;"></span>
-      </div>
-
-      <canvas id="chart1"></canvas>
-      <div id="tile1note" class="note"></div>
-    </div>
-
-    <!-- TILE 2 -->
-    <div class="card">
-      <h2>2) Existing Home Sales (SAAR) + Months Supply</h2>
-      <p class="meta">
-        Bars = existing home sales SAAR (left axis). Line = months supply (right axis).
-        <span class="pill">20Y window (shows what exists)</span>
-      </p>
-      <canvas id="chart2"></canvas>
-      <div id="tile2note" class="note"></div>
-    </div>
-
-    <!-- TILE 3 -->
-    <div class="card">
-      <h2>3) New Home Inventory + Months Supply (New Homes)</h2>
-      <p class="meta">
-        Bars = new homes for sale (left axis). Line = months supply (right axis).
-        <span class="pill">20Y window</span>
-      </p>
-      <canvas id="chart3"></canvas>
-      <div id="tile3note" class="note"></div>
-    </div>
-
-    <!-- TILE 4 -->
-    <div class="card">
-      <h2>4) Single-Family Starts (SAAR) + YoY % (full line)</h2>
-      <p class="meta">
-        Bars = single-family starts SAAR (left axis). Line = YoY % change (right axis, every month).
-        <span class="pill">20Y window</span>
-      </p>
-      <canvas id="chart4"></canvas>
-      <div id="tile4note" class="note"></div>
-    </div>
-
-    <!-- TILE 5 -->
-    <div class="card">
-      <h2>5) Residential construction workers + YoY %</h2>
-      <p class="meta">
-        Bars = residential construction employees (left axis). Line = YoY % change (right axis).
-        <span class="pill">20Y window</span>
-      </p>
-      <canvas id="chart5"></canvas>
-      <div id="tile5note" class="note"></div>
-    </div>
-
-    <!-- TILE 6 -->
-    <div class="card">
-      <h2>6) Consumer sentiment + Unemployment rate</h2>
-      <p class="meta">
-        Bars = consumer sentiment (left axis). Line = unemployment rate (right axis).
-        <span class="pill">20Y window</span>
-      </p>
-      <canvas id="chart6"></canvas>
-      <div id="tile6note" class="note"></div>
-    </div>
-  </div>
-
 <script>
-/* =========================
+/* =========================================================
    CONFIG
-========================= */
+========================================================= */
 const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 const INSIGHTS_URL = PROXY_BASE.replace(/\/$/, "") + "/insights";
 
-// Tile 1 inputs
-const SERIES_PRICE_PROXY = "USAUCSFRCONDOSMSAMID";  // Zillow ZHVI (monthly)
-const SERIES_MORTGAGE_30Y = "MORTGAGE30US";         // Freddie Mac weekly -> monthly avg
+const SERIES = {
+  PRICE_ZILLOW: "USAUCSFRCONDOSMSAMID",
+  MORTGAGE_30Y: "MORTGAGE30US",
 
-// Tile 2
-const SERIES_EHS = "EXHOSLUSM495S";                 // Existing Home Sales SAAR (short history)
-const SERIES_EHS_MONTHS = "HOSSUPUSM673N";          // Existing Home Sales: Months Supply
+  EHS_SAAR: "EXHOSLUSM495S",
+  EHS_MONTHS: "HOSSUPUSM673N",
 
-// Tile 3
-const SERIES_NEW_INV = "HNFSEPUSSA";                // New One Family Homes for Sale
-const SERIES_NEW_MONTHS = "MSACSR";                 // Months supply new houses
+  NEW_INV: "HNFSEPUSSA",
+  NEW_MONTHS: "MSACSR",
 
-// Tile 4
-const SERIES_STARTS_SF = "HOUST1F"; 
-  
-// Tile 5 (NEW)
-const SERIES_RES_WORKERS = "CES2023610001";         // Residential construction employees
+  STARTS_SF: "HOUST1F",
 
-// Tile 6 (NEW)
-const SERIES_SENTIMENT = "UMCSENT";                 // Consumer sentiment
-const SERIES_UNRATE = "UNRATE";                     // Unemployment rate
+  RES_WORKERS: "CES2023610001",
 
-// Recession shading
-const SERIES_USREC = "USREC";                       // NBER recession indicator
+  SENTIMENT: "UMCSENT",
+  UNRATE: "UNRATE",
 
-const YEARS = 20;
+  USREC: "USREC"
+};
+
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-const CACHE_PREFIX = "fredcache_v1:";
+const CACHE_PREFIX = "fredcache_v2:";
 
+const THRESH = {
+  STALE_MONTHLY_DAYS: 62,
+  AFFORD_YOY_GOOD: 0,
+  STARTS_YOY_STRONG: 10,
+  UNRATE_6M_RISE_WARN: 0.3
+};
 
-/* =========================
-   AI COMMENTARY
-========================= */
-async function fetchInsights() {
-  const status = document.getElementById("insightsStatus");
-  const errEl = document.getElementById("insightsErr");
-  const buildersWrap = document.getElementById("buildersWrap");
-  const marketUl = document.getElementById("marketBullets");
+/* =========================================================
+   DOM
+========================================================= */
+const elStatusText = document.getElementById("statusText");
+const elErrText = document.getElementById("errText");
+const elKpiGrid = document.getElementById("kpiGrid");
+const elTiles = document.getElementById("tiles");
 
-  if (!status || !errEl || !buildersWrap || !marketUl) return;
+const elRange = document.getElementById("rangeSelect");
+const elSmooth = document.getElementById("smoothSelect");
+const elDp = document.getElementById("dpRange");
+const elDpLabel = document.getElementById("dpLabel");
+const elRefresh = document.getElementById("refreshBtn");
+const elReload = document.getElementById("reloadBtn");
 
-  try {
-    status.textContent = "Fetching latest commentary...";
-    errEl.textContent = "";
-    buildersWrap.innerHTML = "";
-    marketUl.innerHTML = "";
+// Commentary DOM (now exists in body)
+const elInsightsStatus = document.getElementById("insightsStatus");
+const elInsightsErr = document.getElementById("insightsErr");
+const elBuildersWrap = document.getElementById("buildersWrap");
+const elMarketBullets = document.getElementById("marketBullets");
+const elSignalsBullets = document.getElementById("signalsBullets");
 
-    // Keep nocache=1 while validating. Remove later to use Worker caching.
-    const resp = await fetch(INSIGHTS_URL + "?nocache=1");
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error("Insights failed (" + resp.status + "): " + txt);
-    }
-
-    const data = await resp.json();
-    status.textContent = "As of " + (data.as_of || "latest") + ":";
-
-    const builders = data.builders || {};
-    const order = [
-      ["DHI", "D.R. Horton (DHI)"],
-      ["LEN", "Lennar (LEN)"],
-      ["PHM", "PulteGroup (PHM)"]
-    ];
-
-    for (const [key, label] of order) {
-      const bullets = Array.isArray(builders[key]) ? builders[key] : [];
-
-      const section = document.createElement("div");
-      section.style.margin = "6px 0 10px";
-
-      const title = document.createElement("div");
-      title.style.fontWeight = "700";
-      title.style.marginBottom = "4px";
-      title.textContent = label;
-
-      const ul = document.createElement("ul");
-      ul.style.margin = "0 0 0 18px";
-
-      bullets.forEach(b => {
-        const li = document.createElement("li");
-        li.textContent = b;
-        ul.appendChild(li);
-      });
-
-      section.appendChild(title);
-      section.appendChild(ul);
-      buildersWrap.appendChild(section);
-    }
-
-    const marketBullets =
-      (data.market && Array.isArray(data.market.bullets)) ? data.market.bullets : [];
-
-    marketBullets.forEach(b => {
-      const li = document.createElement("li");
-      li.textContent = b;
-      marketUl.appendChild(li);
-    });
-
-  } catch (e) {
-    status.textContent = "Could not load commentary.";
-    errEl.textContent = String(e && e.message ? e.message : e);
-    console.error(e);
-  }
-}
-
-/* =========================
-   HELPERS
-========================= */
+/* =========================================================
+   FORMATTERS
+========================================================= */
 const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
 const fmtMoney0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const fmtNum0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const fmtPct1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+const fmt1 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
+function formatYM(ym){
+  const [y,m] = ym.split("-");
+  return fmtMonth.format(new Date(Number(y), Number(m)-1, 1));
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
 function parseFredValue(v) {
   if (v === "." || v === null || v === undefined) return null;
   const n = Number(v);
@@ -285,13 +245,37 @@ function pctChange(curr, prev) {
   if (curr === null || prev === null || prev === 0) return null;
   return (curr / prev - 1) * 100;
 }
-function mean(arr) {
-  const clean = arr.filter(x => x !== null && x !== undefined);
-  if (!clean.length) return null;
-  return clean.reduce((a,b)=>a+b,0) / clean.length;
+function rollingMA(values, window){
+  if (!window || window <= 1) return values.slice();
+  const out = [];
+  for (let i=0;i<values.length;i++){
+    const slice = values.slice(Math.max(0, i-window+1), i+1).filter(v => v !== null && v !== undefined);
+    out.push(slice.length ? (slice.reduce((a,b)=>a+b,0)/slice.length) : null);
+  }
+  return out;
 }
-
-// Loan payment formula (P&I): M = L * r / (1 - (1+r)^-n)
+function lastValue(arr){
+  for (let i=arr.length-1;i>=0;i--){
+    if (arr[i] !== null && arr[i] !== undefined) return arr[i];
+  }
+  return null;
+}
+function lastIndexOfNonNull(arr){
+  for (let i=arr.length-1;i>=0;i--){
+    if (arr[i] !== null && arr[i] !== undefined) return i;
+  }
+  return -1;
+}
+function daysBetween(a, b){
+  const ms = Math.abs(b.getTime() - a.getTime());
+  return ms / (1000*60*60*24);
+}
+function computeYoYFromAligned(values, lag=12){
+  return values.map((v, i) => (i >= lag) ? pctChange(v, values[i-lag]) : null);
+}
+function changeOverN(values, n){
+  return values.map((v, i) => (i >= n && v !== null && values[i-n] !== null) ? (v - values[i-n]) : null);
+}
 function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
   if (loanAmount === null || annualRatePct === null) return null;
   const r = (annualRatePct / 100) / 12;
@@ -301,9 +285,9 @@ function monthlyPayment(loanAmount, annualRatePct, nMonths=360) {
   return loanAmount * r / denom;
 }
 
-/* =========================
-   FETCH (via your proxy)
-========================= */
+/* =========================================================
+   FETCH + CACHE (localStorage)
+========================================================= */
 function cacheKeyForSeries(seriesId) { return CACHE_PREFIX + seriesId; }
 
 function readCache(seriesId) {
@@ -318,26 +302,38 @@ function readCache(seriesId) {
     return data;
   } catch { return null; }
 }
-
 function writeCache(seriesId, data) {
   try {
     localStorage.setItem(cacheKeyForSeries(seriesId), JSON.stringify({ savedAt: Date.now(), data }));
   } catch { /* ignore */ }
 }
+function clearAllLocalCache(){
+  try{
+    const keys = [];
+    for (let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if (k && k.startsWith(CACHE_PREFIX)) keys.push(k);
+    }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
 
-async function fetchSeries(seriesId) {
-  const cached = readCache(seriesId);
-  if (cached && Array.isArray(cached.observations)) {
-    const obsCached = cached.observations
-      .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
-      .filter(o => o.value !== null)
-      .sort((a, b) => a.date - b.date);
-    if (obsCached.length) return obsCached;
+async function fetchSeries(seriesId, { bypassCache=false } = {}) {
+  if (!bypassCache){
+    const cached = readCache(seriesId);
+    if (cached && Array.isArray(cached.observations)) {
+      const obsCached = cached.observations
+        .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+        .filter(o => o.value !== null)
+        .sort((a, b) => a.date - b.date);
+      if (obsCached.length) return obsCached;
+    }
   }
 
   const url = new URL(PROXY_BASE);
   url.searchParams.set("series_id", seriesId);
   url.searchParams.set("file_type", "json");
+  if (bypassCache) url.searchParams.set("nocache", "1");
 
   const resp = await fetch(url.toString());
   if (!resp.ok) {
@@ -357,7 +353,6 @@ async function fetchSeries(seriesId) {
   return obs;
 }
 
-/* Convert any frequency to monthly averages (e.g., weekly mortgage rate -> monthly) */
 function toMonthlyAverage(obs) {
   const bucket = new Map();
   for (const o of obs) {
@@ -372,28 +367,34 @@ function toMonthlyAverage(obs) {
     .sort((a,b)=>a.date-b.date);
 }
 
-function lastNYears(obs, years) {
+function sliceWindow(obs, windowYears){
+  if (!obs.length) return obs;
+  if (windowYears === "MAX") return obs.slice();
+  const years = Number(windowYears);
+  if (!Number.isFinite(years) || years <= 0) return obs.slice();
   const latest = obs[obs.length - 1].date;
   const start = addYears(latest, -years);
   return obs.filter(o => o.date >= start);
 }
 
-function alignMonthly(aObs, bObs) {
-  const aMap = new Map(aObs.map(o => [monthKey(o.date), o.value]));
-  const bMap = new Map(bObs.map(o => [monthKey(o.date), o.value]));
-  const keys = Array.from(aMap.keys()).filter(k => bMap.has(k)).sort();
-  const dates = keys.map(k => {
-    const [y,m] = k.split("-");
-    return new Date(Number(y), Number(m)-1, 1);
+function alignMonthlyUnion(seriesList) {
+  const maps = seriesList.map(s => {
+    const m = new Map();
+    s.obs.forEach(o => m.set(monthKey(o.date), o.value));
+    return m;
   });
-  const aVals = keys.map(k => aMap.get(k));
-  const bVals = keys.map(k => bMap.get(k));
-  return { dates, aVals, bVals, keys };
+
+  const keySet = new Set();
+  maps.forEach(m => m.forEach((_,k)=>keySet.add(k)));
+  const keys = Array.from(keySet).sort();
+
+  const valuesBySeries = maps.map(m => keys.map(k => m.has(k) ? m.get(k) : null));
+  return { keys, valuesBySeries };
 }
 
-/* =========================
-   RECESSION SHADING
-========================= */
+/* =========================================================
+   RECESSION SHADING (USREC)
+========================================================= */
 function recessionRangesFromUSREC(usrecMonthlyObs) {
   const sorted = [...usrecMonthlyObs].sort((a,b)=>a.date-b.date);
   const ranges = [];
@@ -402,17 +403,19 @@ function recessionRangesFromUSREC(usrecMonthlyObs) {
 
   for (const o of sorted) {
     const isRec = o.value >= 1;
-    if (!inRec && isRec) { inRec = true; start = o.date; }
+    if (!inRec && isRec) { inRec = true; start = monthKey(o.date); }
     if (inRec && !isRec) {
-      const end = new Date(o.date.getFullYear(), o.date.getMonth(), 1);
-      ranges.push({ start, end });
+      const end = monthKey(o.date);
+      ranges.push({ startYM: start, endYM: end });
       inRec = false; start = null;
     }
   }
   if (inRec && start) {
-    const last = sorted[sorted.length - 1].date;
-    const end = new Date(last.getFullYear(), last.getMonth()+1, 1);
-    ranges.push({ start, end });
+    const last = monthKey(sorted[sorted.length - 1].date);
+    const [y,m] = last.split("-");
+    const end = new Date(Number(y), Number(m)-1, 1);
+    end.setMonth(end.getMonth()+1);
+    ranges.push({ startYM: start, endYM: monthKey(end) });
   }
   return ranges;
 }
@@ -428,22 +431,18 @@ function makeRecessionPlugin(getRanges) {
       const x = scales.x;
       if (!x || !chartArea) return;
 
+      const labels = chart.data.labels || []; // YYYY-MM
+      const labelToIndex = new Map(labels.map((lab,i)=>[lab,i]));
+
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,0.06)";
-
-      const labels = chart.data.labels || [];
-      const labelToIndex = new Map(labels.map((lab,i)=>[lab,i]));
 
       function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
 
       for (const r of ranges) {
-        const startLab = fmtMonth.format(new Date(r.start.getFullYear(), r.start.getMonth(), 1));
-        const endLab = fmtMonth.format(new Date(r.end.getFullYear(), r.end.getMonth()-1, 1));
-
-        if (!labelToIndex.has(startLab) || !labelToIndex.has(endLab)) continue;
-
-        const i0 = labelToIndex.get(startLab);
-        const i1 = labelToIndex.get(endLab);
+        if (!labelToIndex.has(r.startYM)) continue;
+        const i0 = labelToIndex.get(r.startYM);
+        const i1 = labelToIndex.has(r.endYM) ? labelToIndex.get(r.endYM) : (labels.length - 1);
 
         const px0 = x.getPixelForValue(i0);
         const px1 = x.getPixelForValue(i1);
@@ -459,16 +458,46 @@ function makeRecessionPlugin(getRanges) {
   };
 }
 
-/* =========================
-   CHART BUILDER
-========================= */
-function makeMixedBarLineChart(canvasId, labels, barData, lineData, opts) {
-  const ctx = document.getElementById(canvasId);
+function makeLatestLabelPlugin() {
+  return {
+    id: "latestLabel",
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const ds = chart.data.datasets || [];
+      if (!ds.length) return;
 
-  return new Chart(ctx, {
+      const lineIndex = ds.findIndex(d => d.type === "line");
+      const idx = lineIndex >= 0 ? lineIndex : 0;
+      const data = ds[idx].data || [];
+      const lastIdx = lastIndexOfNonNull(data);
+      if (lastIdx < 0) return;
+
+      const xScale = chart.scales.x;
+      const yScale = chart.scales[ds[idx].yAxisID || "y"];
+      if (!xScale || !yScale) return;
+
+      const x = xScale.getPixelForValue(lastIdx);
+      const y = yScale.getPixelForValue(data[lastIdx]);
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.font = "12px Arial";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Latest", x + 6, y);
+      ctx.restore();
+    }
+  };
+}
+
+/* =========================================================
+   CHART BUILDER
+========================================================= */
+function makeMixedBarLineChart(canvas, labelsYM, barData, lineData, opts) {
+  return new Chart(canvas, {
     type: "bar",
     data: {
-      labels,
+      labels: labelsYM, // YYYY-MM
       datasets: [
         {
           type: "bar",
@@ -494,11 +523,26 @@ function makeMixedBarLineChart(canvasId, labels, barData, lineData, opts) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { display: true }
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const ym = items?.[0]?.label;
+              return ym ? formatYM(ym) : "";
+            }
+          }
+        },
+        decimation: { enabled: true, algorithm: "lttb", samples: 500 }
       },
       scales: {
-        x: { ticks: { maxTicksLimit: 12 } },
+        x: {
+          ticks: {
+            maxTicksLimit: 12,
+            callback: (val, idx) => formatYM(labelsYM[idx])
+          }
+        },
         yBar: {
           position: "left",
           ticks: { callback: (v) => opts.barTick(v) },
@@ -515,231 +559,677 @@ function makeMixedBarLineChart(canvasId, labels, barData, lineData, opts) {
   });
 }
 
-/* =========================
-   MAIN
-========================= */
-let charts = {};
+/* =========================================================
+   TILE DEFINITIONS
+========================================================= */
+function lastUpdatedYM(labelsYM, values){
+  const i = lastIndexOfNonNull(values);
+  return i >= 0 ? labelsYM[i] : null;
+}
+function computeStaleness(updatedYM){
+  if (!updatedYM) return { level:"warn", text:"Staleness: —" };
+  const [y,m] = updatedYM.split("-");
+  const updatedDate = new Date(Number(y), Number(m)-1, 1);
+  const now = new Date();
+  const d = daysBetween(updatedDate, now);
+
+  if (d <= THRESH.STALE_MONTHLY_DAYS) return { level:"good", text:`Fresh (${Math.round(d)}d)` };
+  if (d <= THRESH.STALE_MONTHLY_DAYS * 1.7) return { level:"warn", text:`Stale (${Math.round(d)}d)` };
+  return { level:"bad", text:`Very stale (${Math.round(d)}d)` };
+}
+function setTileUpdateBadges(tileKey, updatedYM, staleness){
+  const upd = document.getElementById(`upd_${tileKey}`);
+  const stale = document.getElementById(`stale_${tileKey}`);
+  if (upd) upd.textContent = updatedYM ? `Updated: ${formatYM(updatedYM)}` : "Updated: —";
+  if (stale) {
+    stale.textContent = staleness ? staleness.text : "Staleness: —";
+    stale.style.borderColor = staleness.level === "good" ? "rgba(26,127,55,0.35)"
+                         : staleness.level === "bad"  ? "rgba(176,0,32,0.25)"
+                         : "rgba(154,106,0,0.35)";
+  }
+}
+
+const TILES = [
+  {
+    key: "t1_afford",
+    title: "1) Median monthly payment (P&I) + 30Y mortgage rate",
+    meta: "Bars = estimated monthly P&I payment (left axis). Line = 30Y mortgage rate (right axis).",
+    pill: "Windowed",
+    build: ({ labelsYM, series, state }) => {
+      const price = series.PRICE_ZILLOW;
+      const rate = series.MORTGAGE_30Y_M;
+
+      const payments = price.map((p, i) => {
+        const r = rate[i];
+        if (p === null || r === null) return null;
+        const dpDollars = p * (state.dpPct / 100);
+        const loan = Math.max(0, p - dpDollars);
+        return monthlyPayment(loan, r, 360);
+      });
+
+      return {
+        labelsYM,
+        bar: payments,
+        line: rate,
+        chartOpts: {
+          barLabel: "Est. monthly payment (P&I)",
+          lineLabel: "30Y mortgage rate",
+          barAxisTitle: "Monthly payment ($)",
+          lineAxisTitle: "Mortgage rate (%)",
+          barTick: (v) => "$" + fmtMoney0.format(v),
+          lineTick: (v) => fmt1.format(v) + "%"
+        },
+        note: "Home price proxy: Zillow ZHVI. Mortgage rate: Freddie Mac weekly averaged to monthly. Recession shading: USREC."
+      };
+    },
+    kpi: ({ labelsYM, series, state }) => {
+      const price = series.PRICE_ZILLOW;
+      const rate = series.MORTGAGE_30Y_M;
+      const payments = price.map((p, i) => {
+        const r = rate[i];
+        if (p === null || r === null) return null;
+        const dpDollars = p * (state.dpPct / 100);
+        const loan = Math.max(0, p - dpDollars);
+        return monthlyPayment(loan, r, 360);
+      });
+
+      const latest = lastValue(payments);
+      const prev12 = payments.length >= 13 ? payments[payments.length-13] : null;
+      const yoy = pctChange(latest, prev12);
+
+      return {
+        name: "Affordability (P&I)",
+        value: latest,
+        valueFmt: (v) => v === null ? "—" : "$" + fmtMoney0.format(v),
+        yoy,
+        yoyFmt: (v) => v === null ? "—" : fmt1.format(v) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, payments),
+        tag: (value, yoy) => (yoy !== null && yoy < THRESH.AFFORD_YOY_GOOD)
+          ? { text:"Improving YoY", cls:"good" }
+          : { text:"Watch rates/prices", cls:"warn" }
+      };
+    }
+  },
+  {
+    key: "t2_ehs",
+    title: "2) Existing Home Sales (SAAR) + Months Supply",
+    meta: "Bars = existing home sales SAAR (left axis). Line = months supply (right axis).",
+    pill: "Windowed (series-dependent history)",
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.EHS_SAAR,
+      line: series.EHS_MONTHS,
+      chartOpts: {
+        barLabel: "Existing Home Sales (SAAR)",
+        lineLabel: "Months supply",
+        barAxisTitle: "Sales (SAAR, units)",
+        lineAxisTitle: "Months",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v)
+      },
+      note: "Note: some EHS series have short history. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.EHS_SAAR);
+      const prev12 = series.EHS_SAAR.length >= 13 ? series.EHS_SAAR[series.EHS_SAAR.length-13] : null;
+      const yoy = pctChange(v, prev12);
+      return {
+        name: "Existing Home Sales",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.EHS_SAAR),
+        tag: (_v, yy) => (yy !== null && yy > 0) ? { text:"Rising demand", cls:"good" } : { text:"Weak/flat", cls:"warn" }
+      };
+    }
+  },
+  {
+    key: "t3_newinv",
+    title: "3) New Home Inventory + Months Supply (New Homes)",
+    meta: "Bars = new homes for sale (left axis). Line = months supply (right axis).",
+    pill: "Windowed",
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.NEW_INV,
+      line: series.NEW_MONTHS,
+      chartOpts: {
+        barLabel: "New homes for sale (inventory)",
+        lineLabel: "Months supply (new homes)",
+        barAxisTitle: "Inventory (thousands)",
+        lineAxisTitle: "Months",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v)
+      },
+      note: "Inventory: HNFSEPUSSA (thousands). Months supply: MSACSR. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.NEW_MONTHS);
+      const prev12 = series.NEW_MONTHS.length >= 13 ? series.NEW_MONTHS[series.NEW_MONTHS.length-13] : null;
+      const yoy = pctChange(v, prev12);
+      return {
+        name: "New Home Supply",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmt1.format(x) + " mo",
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.NEW_MONTHS),
+        tag: (x) => (x !== null && x >= 7) ? { text:"High supply", cls:"warn" }
+              : (x !== null && x <= 4.5) ? { text:"Tight supply", cls:"good" }
+              : { text:"Balanced", cls:"warn" }
+      };
+    }
+  },
+  {
+    key: "t4_starts",
+    title: "4) Single-Family Starts (SAAR) + YoY % (full line)",
+    meta: "Bars = single-family starts SAAR (left axis). Line = YoY % change (right axis).",
+    pill: "Windowed",
+    build: ({ labelsYM, series }) => {
+      const starts = series.STARTS_SF;
+      const yoy = computeYoYFromAligned(starts, 12);
+      return {
+        labelsYM,
+        bar: starts,
+        line: yoy,
+        chartOpts: {
+          barLabel: "Single-family starts (SAAR)",
+          lineLabel: "YoY % change",
+          barAxisTitle: "Starts (SAAR)",
+          lineAxisTitle: "YoY (%)",
+          barTick: (v) => fmtNum0.format(v),
+          lineTick: (v) => fmt1.format(v) + "%"
+        },
+        note: "Starts: HOUST1F (SAAR). YoY computed as t vs t-12. Recession shading: USREC."
+      };
+    },
+    kpi: ({ labelsYM, series }) => {
+      const starts = series.STARTS_SF;
+      const yoy = computeYoYFromAligned(starts, 12);
+      const latestYoY = lastValue(yoy);
+      return {
+        name: "Single-Family Starts",
+        value: lastValue(starts),
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
+        yoy: latestYoY,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, starts),
+        tag: (_v, yy) => (yy !== null && yy >= THRESH.STARTS_YOY_STRONG) ? { text:"Strong growth", cls:"good" }
+             : (yy !== null && yy < 0) ? { text:"Contracting", cls:"warn" }
+             : { text:"Mixed", cls:"warn" }
+      };
+    }
+  },
+  {
+    key: "t5_workers",
+    title: "5) Residential construction workers + YoY %",
+    meta: "Bars = residential construction employees (left axis). Line = YoY % change (right axis).",
+    pill: "Windowed",
+    build: ({ labelsYM, series }) => {
+      const workers = series.RES_WORKERS;
+      const yoy = computeYoYFromAligned(workers, 12);
+      return {
+        labelsYM,
+        bar: workers,
+        line: yoy,
+        chartOpts: {
+          barLabel: "Residential construction employees",
+          lineLabel: "YoY % change",
+          barAxisTitle: "Employees",
+          lineAxisTitle: "YoY (%)",
+          barTick: (v) => fmtNum0.format(v),
+          lineTick: (v) => fmt1.format(v) + "%"
+        },
+        note: "Bars: CES2023610001. Line: YoY % change. Recession shading: USREC."
+      };
+    },
+    kpi: ({ labelsYM, series }) => {
+      const v = lastValue(series.RES_WORKERS);
+      const prev12 = series.RES_WORKERS.length >= 13 ? series.RES_WORKERS[series.RES_WORKERS.length-13] : null;
+      const yoy = pctChange(v, prev12);
+      return {
+        name: "Res. Construction Jobs",
+        value: v,
+        valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
+        yoy,
+        yoyFmt: (x) => x === null ? "—" : fmt1.format(x) + "% YoY",
+        updatedYM: lastUpdatedYM(labelsYM, series.RES_WORKERS),
+        tag: (_v, yy) => (yy !== null && yy > 0) ? { text:"Hiring", cls:"good" }
+             : (yy !== null && yy < 0) ? { text:"Softening", cls:"warn" }
+             : { text:"Flat", cls:"warn" }
+      };
+    }
+  },
+  {
+    key: "t6_macro",
+    title: "6) Consumer sentiment + Unemployment rate",
+    meta: "Bars = consumer sentiment (left axis). Line = unemployment rate (right axis).",
+    pill: "Windowed",
+    build: ({ labelsYM, series }) => ({
+      labelsYM,
+      bar: series.SENTIMENT,
+      line: series.UNRATE,
+      chartOpts: {
+        barLabel: "Consumer sentiment (UMCSENT)",
+        lineLabel: "Unemployment rate (UNRATE)",
+        barAxisTitle: "Sentiment index",
+        lineAxisTitle: "Unemployment (%)",
+        barTick: (v) => fmtNum0.format(v),
+        lineTick: (v) => fmt1.format(v) + "%"
+      },
+      note: "Bars: UMCSENT. Line: UNRATE. Recession shading: USREC."
+    }),
+    kpi: ({ labelsYM, series }) => {
+      const un = series.UNRATE;
+      const un6m = changeOverN(un, 6);
+      const latest6m = lastValue(un6m);
+      return {
+        name: "Macro (Unemployment)",
+        value: lastValue(un),
+        valueFmt: (x) => x === null ? "—" : fmt1.format(x) + "%",
+        yoy: latest6m,
+        yoyFmt: (x) => x === null ? "—" : ((x>=0?"+":"") + fmt1.format(x) + " pp (6m)"),
+        updatedYM: lastUpdatedYM(labelsYM, un),
+        tag: (_v, d6m) => (d6m !== null && d6m >= THRESH.UNRATE_6M_RISE_WARN)
+          ? { text:"Rising jobless", cls:"warn" }
+          : { text:"Stable labor", cls:"good" }
+      };
+    }
+  }
+];
+
+/* =========================================================
+   STATE + CHARTS
+========================================================= */
+const state = {
+  window: elRange.value,
+  smooth: Number(elSmooth.value),
+  dpPct: Number(elDp.value)
+};
+
+let chartsByKey = new Map();
 let recessionRanges = [];
+let rawMonthly = {};
+let labelsYMAll = [];
 
-(async function main() {
-  fetchInsights();
+/* =========================================================
+   UI BUILDERS
+========================================================= */
+function mk(tag, attrs={}, children=[]){
+  const el = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v]) => {
+    if (k === "class") el.className = v;
+    else if (k === "html") el.innerHTML = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  });
+  (Array.isArray(children) ? children : [children]).forEach(ch => {
+    if (ch === null || ch === undefined) return;
+    if (typeof ch === "string") el.appendChild(document.createTextNode(ch));
+    else el.appendChild(ch);
+  });
+  return el;
+}
 
-  const statusText = document.getElementById("statusText");
-  const errText = document.getElementById("errText");
+function buildTileShell(tile){
+  const card = mk("div", { class:"card", id: `card_${tile.key}` });
+  const h2 = mk("h2", {}, tile.title);
+  const meta = mk("p", { class:"meta" }, [
+    tile.meta + " ",
+    mk("span", { class:"pill" }, tile.pill)
+  ]);
+
+  const statusRow = mk("div", { class:"tileStatus" }, [
+    mk("div", { class:"left" }, [
+      mk("span", { class:"pill", id:`upd_${tile.key}` }, "Updated: —"),
+      mk("span", { class:"pill", id:`stale_${tile.key}` }, "Staleness: —")
+    ]),
+    mk("div", { class:"small", id:`lag_${tile.key}` }, "")
+  ]);
+
+  const canvas = mk("canvas", { id:`cv_${tile.key}` });
+  const note = mk("div", { class:"note", id:`note_${tile.key}` }, "");
+  const err = mk("div", { class:"tileErr", id:`err_${tile.key}` }, "");
+
+  card.appendChild(h2);
+  card.appendChild(meta);
+  card.appendChild(statusRow);
+  card.appendChild(canvas);
+  card.appendChild(note);
+  card.appendChild(err);
+  return card;
+}
+
+function renderTilesShell(){
+  elTiles.innerHTML = "";
+  TILES.forEach(t => elTiles.appendChild(buildTileShell(t)));
+}
+
+function renderKpis(kpiObjects){
+  elKpiGrid.innerHTML = "";
+  kpiObjects.forEach(k => {
+    const tag = (typeof k.tag === "function") ? k.tag(k.value, k.yoy) : { text:"", cls:"warn" };
+    const staleInfo = computeStaleness(k.updatedYM);
+    const staleTag = staleInfo.level === "good" ? "good" : (staleInfo.level === "bad" ? "bad" : "warn");
+
+    const card = mk("div", { class:"card kpiCard" }, [
+      mk("h3", {}, k.name),
+      mk("div", { class:"kpiMain" }, [
+        mk("div", { class:"kpiValue" }, k.valueFmt(k.value)),
+        mk("div", { class:"kpiDelta" }, k.yoyFmt(k.yoy))
+      ]),
+      mk("div", { class:"kpiFooter" }, [
+        mk("span", { class:`kpiTag ${tag.cls}` }, tag.text || "—"),
+        mk("span", { class:`kpiTag ${staleTag}` }, staleInfo.text)
+      ])
+    ]);
+    elKpiGrid.appendChild(card);
+  });
+}
+
+/* =========================================================
+   COMMENTARY (external + auto signals)
+========================================================= */
+async function fetchInsights({ bypassCache=false } = {}) {
+  if (!elInsightsStatus || !elInsightsErr) return;
 
   try {
-    statusText.textContent = "Fetching series…";
-    errText.textContent = "";
+    elInsightsStatus.textContent = "Fetching latest commentary...";
+    elInsightsErr.textContent = "";
+    elBuildersWrap.innerHTML = "";
+    elMarketBullets.innerHTML = "";
 
-    const [
-      priceRaw,
-      mortWeeklyRaw,
-      ehsRaw,
-      ehsMonthsRaw,
-      newInvRaw,
-      newMonthsRaw,
-      permitsRaw,
-      resWorkersRaw,
-      sentimentRaw,
-      unrateRaw,
-      usrecRaw
-    ] = await Promise.all([
-      fetchSeries(SERIES_PRICE_PROXY),
-      fetchSeries(SERIES_MORTGAGE_30Y),
-      fetchSeries(SERIES_EHS),
-      fetchSeries(SERIES_EHS_MONTHS),
-      fetchSeries(SERIES_NEW_INV),
-      fetchSeries(SERIES_NEW_MONTHS),
-      fetchSeries(SERIES_STARTS_SF),
-      fetchSeries(SERIES_RES_WORKERS),
-      fetchSeries(SERIES_SENTIMENT),
-      fetchSeries(SERIES_UNRATE),
-      fetchSeries(SERIES_USREC)
-    ]);
+    const url = new URL(INSIGHTS_URL);
+    if (bypassCache) url.searchParams.set("nocache", "1");
 
-    // Monthly conversions + 20Y slicing
-    const price = lastNYears(priceRaw, YEARS);
-    const mortMonthly = lastNYears(toMonthlyAverage(mortWeeklyRaw), YEARS);
+    const resp = await fetch(url.toString());
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error("Insights failed (" + resp.status + "): " + txt);
+    }
+    const data = await resp.json();
+    elInsightsStatus.textContent = "As of " + (data.as_of || "latest") + ":";
 
-    const ehs = lastNYears(ehsRaw, YEARS);
-    const ehsMonths = lastNYears(ehsMonthsRaw, YEARS);
-
-    const newInv = lastNYears(newInvRaw, YEARS);
-    const newMonths = lastNYears(newMonthsRaw, YEARS);
-
-    const permits = lastNYears(permitsRaw, YEARS);
-
-    const resWorkers = lastNYears(resWorkersRaw, YEARS);
-
-    const sentiment = lastNYears(sentimentRaw, YEARS);
-    const unrate = lastNYears(unrateRaw, YEARS);
-
-    const usrecMonthly = lastNYears(usrecRaw, YEARS);
-
-    recessionRanges = recessionRangesFromUSREC(usrecMonthly);
-    Chart.register(makeRecessionPlugin(() => recessionRanges));
-
-    // -------------------------
-    // TILE 1: payment + rate
-    // -------------------------
-    const aligned1 = alignMonthly(price, mortMonthly);
-    const labels1 = aligned1.dates.map(d => fmtMonth.format(d));
-    const latestPrice = aligned1.aVals[aligned1.aVals.length - 1];
-
-    const dpPctInput = document.getElementById("downPaymentPct");
-    const dpPctLabel = document.getElementById("dpPctLabel");
-    const dpHint = document.getElementById("dpHint");
-
-    dpPctInput.value = "20";
-    dpPctLabel.textContent = "20%";
-
-    function computePayments(dpPct) {
-      return aligned1.aVals.map((p, i) => {
-        const rate = aligned1.bVals[i];
-        const dpDollars = p * (dpPct / 100);
-        const loan = Math.max(0, p - dpDollars);
-        return monthlyPayment(loan, rate, 360);
-      });
+    const builders = data.builders || {};
+    const order = [
+      ["DHI", "D.R. Horton (DHI)"],
+      ["LEN", "Lennar (LEN)"],
+      ["PHM", "PulteGroup (PHM)"]
+    ];
+    for (const [key, label] of order) {
+      const bullets = Array.isArray(builders[key]) ? builders[key] : [];
+      const section = mk("div", { style:"margin:6px 0 10px;" }, [
+        mk("div", { style:"font-weight:700; margin-bottom:4px;" }, label),
+        mk("ul", { style:"margin:0 0 0 18px;" }, bullets.map(b => mk("li", {}, b)))
+      ]);
+      elBuildersWrap.appendChild(section);
     }
 
-    function updateDpHint(dpPct) {
-      if (!latestPrice) { dpHint.textContent = ""; return; }
-      const dpDollarsLatest = latestPrice * (dpPct / 100);
-      const ltv = 100 - dpPct;
-
-      dpHint.textContent =
-        `Latest price: $${fmtMoney0.format(latestPrice)} • Down: ${dpPct}% ($${fmtMoney0.format(dpDollarsLatest)}) • LTV: ${fmtPct1.format(ltv)}%`;
-    }
-    updateDpHint(20);
-
-    charts.c1 = makeMixedBarLineChart("chart1", labels1, computePayments(20), aligned1.bVals, {
-      barLabel: "Est. monthly payment (P&I)",
-      lineLabel: "30Y mortgage rate",
-      barAxisTitle: "Monthly payment ($)",
-      lineAxisTitle: "Mortgage rate (%)",
-      barTick: (v) => "$" + fmtMoney0.format(v),
-      lineTick: (v) => fmtPct1.format(v) + "%"
-    });
-
-    document.getElementById("tile1note").textContent =
-      "Home price proxy: Zillow ZHVI (typical home value; monthly, dollars). Mortgage rate is Freddie Mac weekly series averaged to monthly. Recession shading is USREC.";
-
-    dpPctInput.addEventListener("input", () => {
-      let dpPct = Number(dpPctInput.value || 0);
-      if (!Number.isFinite(dpPct)) dpPct = 0;
-      dpPct = Math.max(0, Math.min(50, dpPct));
-
-      dpPctLabel.textContent = dpPct + "%";
-      charts.c1.data.datasets[0].data = computePayments(dpPct);
-      charts.c1.update();
-      updateDpHint(dpPct);
-    });
-
-    // -------------------------
-    // TILE 2: existing sales + months supply
-    // -------------------------
-    const aligned2 = alignMonthly(ehs, ehsMonths);
-    const labels2 = aligned2.dates.map(d => fmtMonth.format(d));
-
-    charts.c2 = makeMixedBarLineChart("chart2", labels2, aligned2.aVals, aligned2.bVals, {
-      barLabel: "Existing Home Sales (SAAR)",
-      lineLabel: "Months supply",
-      barAxisTitle: "Sales (SAAR, units)",
-      lineAxisTitle: "Months",
-      barTick: (v) => fmtNum0.format(v),
-      lineTick: (v) => fmtPct1.format(v)
-    });
-
-    document.getElementById("tile2note").textContent =
-      (labels2.length < 36)
-        ? "Note: FRED’s Existing Home Sales + Months Supply series currently only provide recent history (begins Dec 2024). This tile plots all available data. Recession shading is USREC."
-        : "Recession shading is USREC.";
-
-    // -------------------------
-    // TILE 3: new inventory + months supply
-    // -------------------------
-    const aligned3 = alignMonthly(newInv, newMonths);
-    const labels3 = aligned3.dates.map(d => fmtMonth.format(d));
-
-    charts.c3 = makeMixedBarLineChart("chart3", labels3, aligned3.aVals, aligned3.bVals, {
-      barLabel: "New homes for sale (inventory)",
-      lineLabel: "Months supply (new homes)",
-      barAxisTitle: "Inventory (thousands)",
-      lineAxisTitle: "Months",
-      barTick: (v) => fmtNum0.format(v),
-      lineTick: (v) => fmtPct1.format(v)
-    });
-
-    document.getElementById("tile3note").textContent =
-      "Inventory series is 'New One Family Homes for Sale' (thousands). Months supply is MSACSR. Recession shading is USREC.";
-
-   // -------------------------
-// TILE 4: single-family starts + YoY line
-// -------------------------
-const starts20 = permits; // this variable holds HOUST1F right now (you named it permits earlier)
-const labels4 = starts20.map(o => fmtMonth.format(o.date));
-const startsVals = starts20.map(o => o.value);
-const yoyStarts = starts20.map((o, i) => (i >= 12) ? pctChange(o.value, starts20[i-12].value) : null);
-
-charts.c4 = makeMixedBarLineChart("chart4", labels4, startsVals, yoyStarts, {
-  barLabel: "Single-family starts (SAAR)",
-  lineLabel: "YoY % change",
-  barAxisTitle: "Starts (SAAR)",
-  lineAxisTitle: "YoY (%)",
-  barTick: (v) => fmtNum0.format(v),
-  lineTick: (v) => fmtPct1.format(v) + "%"
-});
-
-document.getElementById("tile4note").textContent =
-  "Starts series is HOUST1F (single-family starts, SAAR). YoY line is computed for every month (t vs t-12). Recession shading is USREC.";
-
-    // -------------------------
-    // TILE 5: res construction workers + YoY
-    // -------------------------
-    const labels5 = resWorkers.map(o => fmtMonth.format(o.date));
-    const workersVals = resWorkers.map(o => o.value);
-    const yoyWorkers = resWorkers.map((o, i) => (i >= 12) ? pctChange(o.value, resWorkers[i-12].value) : null);
-
-    charts.c5 = makeMixedBarLineChart("chart5", labels5, workersVals, yoyWorkers, {
-      barLabel: "Residential construction employees",
-      lineLabel: "YoY % change",
-      barAxisTitle: "Employees",
-      lineAxisTitle: "YoY (%)",
-      barTick: (v) => fmtNum0.format(v),
-      lineTick: (v) => fmtPct1.format(v) + "%"
-    });
-
-    document.getElementById("tile5note").textContent =
-      "Bars are CES2023610001 (residential construction employment). Line is YoY % change. Recession shading is USREC.";
-
-    // -------------------------
-    // TILE 6: sentiment + unemployment
-    // -------------------------
-    const aligned6 = alignMonthly(sentiment, unrate);
-    const labels6 = aligned6.dates.map(d => fmtMonth.format(d));
-
-    charts.c6 = makeMixedBarLineChart("chart6", labels6, aligned6.aVals, aligned6.bVals, {
-      barLabel: "Consumer sentiment (UMCSENT)",
-      lineLabel: "Unemployment rate (UNRATE)",
-      barAxisTitle: "Sentiment index",
-      lineAxisTitle: "Unemployment (%)",
-      barTick: (v) => fmtNum0.format(v),
-      lineTick: (v) => fmtPct1.format(v) + "%"
-    });
-
-    document.getElementById("tile6note").textContent =
-      "Bars are UMCSENT. Line is UNRATE. Recession shading is USREC.";
-
-    // Status
-    const latestAny = priceRaw[priceRaw.length - 1].date;
-    statusText.innerHTML = `<span class="ok">Loaded</span> all series. Latest price-proxy observation: ${fmtMonth.format(latestAny)}.`;
+    const marketBullets = (data.market && Array.isArray(data.market.bullets)) ? data.market.bullets : [];
+    marketBullets.forEach(b => elMarketBullets.appendChild(mk("li", {}, b)));
 
   } catch (e) {
-    statusText.textContent = "Could not load data.";
-    errText.textContent = String(e && e.message ? e.message : e);
+    elInsightsStatus.textContent = "Could not load external commentary.";
+    elInsightsErr.textContent = String(e && e.message ? e.message : e);
     console.error(e);
   }
-})();
+}
+
+function renderAutoSignals(kpis){
+  if (!elSignalsBullets) return;
+  elSignalsBullets.innerHTML = "";
+  const byName = new Map(kpis.map(k => [k.name, k]));
+
+  const aff = byName.get("Affordability (P&I)");
+  const starts = byName.get("Single-Family Starts");
+  const ehs = byName.get("Existing Home Sales");
+  const un = byName.get("Macro (Unemployment)");
+  const supply = byName.get("New Home Supply");
+
+  const bullets = [];
+
+  if (aff && aff.yoy !== null){
+    bullets.push(
+      aff.yoy < 0
+        ? `Affordability improving: estimated P&I payment is ${fmt1.format(aff.yoy)}% YoY (down).`
+        : `Affordability still tightening: estimated P&I payment is ${fmt1.format(aff.yoy)}% YoY (up).`
+    );
+  }
+  if (starts && starts.yoy !== null){
+    bullets.push(
+      starts.yoy >= THRESH.STARTS_YOY_STRONG
+        ? `Construction momentum: single-family starts are running ${fmt1.format(starts.yoy)}% YoY.`
+        : `Starts signal is mixed: single-family starts are ${fmt1.format(starts.yoy)}% YoY.`
+    );
+  }
+  if (ehs && ehs.yoy !== null){
+    bullets.push(
+      ehs.yoy > 0
+        ? `Resale demand improving: existing home sales are ${fmt1.format(ehs.yoy)}% YoY.`
+        : `Resale demand soft/flat: existing home sales are ${fmt1.format(ehs.yoy)}% YoY.`
+    );
+  }
+  if (un && un.yoy !== null){
+    bullets.push(
+      un.yoy >= THRESH.UNRATE_6M_RISE_WARN
+        ? `Macro watch: unemployment is up ${fmt1.format(un.yoy)} pp over 6 months.`
+        : `Labor market stable: unemployment change over 6 months is ${un.yoy>=0?"+":""}${fmt1.format(un.yoy)} pp.`
+    );
+  }
+  if (supply && supply.value !== null){
+    bullets.push(
+      supply.value >= 7
+        ? `New home supply is elevated (${fmt1.format(supply.value)} months), typically more promotional pressure.`
+        : `New home supply is moderate/tight (${fmt1.format(supply.value)} months), typically supportive of pricing.`
+    );
+  }
+
+  if (!bullets.length) bullets.push("Signals unavailable (insufficient data history for selected window).");
+  bullets.forEach(b => elSignalsBullets.appendChild(mk("li", {}, b)));
+}
+
+/* =========================================================
+   DATA LOAD + RENDER PIPELINE
+========================================================= */
+async function loadAllSeries({ bypassCache=false } = {}) {
+  const [
+    priceRaw,
+    mortWeeklyRaw,
+    ehsRaw,
+    ehsMonthsRaw,
+    newInvRaw,
+    newMonthsRaw,
+    startsRaw,
+    resWorkersRaw,
+    sentimentRaw,
+    unrateRaw,
+    usrecRaw
+  ] = await Promise.all([
+    fetchSeries(SERIES.PRICE_ZILLOW, { bypassCache }),
+    fetchSeries(SERIES.MORTGAGE_30Y, { bypassCache }),
+    fetchSeries(SERIES.EHS_SAAR, { bypassCache }),
+    fetchSeries(SERIES.EHS_MONTHS, { bypassCache }),
+    fetchSeries(SERIES.NEW_INV, { bypassCache }),
+    fetchSeries(SERIES.NEW_MONTHS, { bypassCache }),
+    fetchSeries(SERIES.STARTS_SF, { bypassCache }),
+    fetchSeries(SERIES.RES_WORKERS, { bypassCache }),
+    fetchSeries(SERIES.SENTIMENT, { bypassCache }),
+    fetchSeries(SERIES.UNRATE, { bypassCache }),
+    fetchSeries(SERIES.USREC, { bypassCache })
+  ]);
+
+  return {
+    PRICE_ZILLOW: priceRaw,
+    MORTGAGE_30Y_M: toMonthlyAverage(mortWeeklyRaw),
+    EHS_SAAR: ehsRaw,
+    EHS_MONTHS: ehsMonthsRaw,
+    NEW_INV: newInvRaw,
+    NEW_MONTHS: newMonthsRaw,
+    STARTS_SF: startsRaw,
+    RES_WORKERS: resWorkersRaw,
+    SENTIMENT: sentimentRaw,
+    UNRATE: unrateRaw,
+    USREC: usrecRaw
+  };
+}
+
+function buildMonthlyAligned(seriesObsByName, window){
+  const sliced = {};
+  Object.entries(seriesObsByName).forEach(([name, obs]) => {
+    sliced[name] = sliceWindow(obs, window);
+  });
+
+  const seriesList = Object.entries(sliced).map(([name, obs]) => ({ name, obs }));
+  const aligned = alignMonthlyUnion(seriesList);
+
+  const labelsYM = aligned.keys;
+  const values = aligned.valuesBySeries;
+
+  const out = { labelsYM };
+  seriesList.forEach((s, idx) => { out[s.name] = values[idx]; });
+  return out;
+}
+
+function applySmoothing(seriesAligned, smoothWindow){
+  if (!smoothWindow || smoothWindow <= 1) return seriesAligned;
+  const out = { labelsYM: seriesAligned.labelsYM.slice() };
+  Object.entries(seriesAligned).forEach(([k, v]) => {
+    if (k === "labelsYM") return;
+    out[k] = rollingMA(v, smoothWindow);
+  });
+  return out;
+}
+
+function renderAll(){
+  const labelsYM = labelsYMAll;
+  const series = rawMonthly;
+
+  if (!Chart.registry.plugins.get("recessionShading")) Chart.register(makeRecessionPlugin(() => recessionRanges));
+  if (!Chart.registry.plugins.get("latestLabel")) Chart.register(makeLatestLabelPlugin());
+
+  const kpis = TILES.map(t => t.kpi({ labelsYM, series, state })).filter(Boolean);
+  renderKpis(kpis);
+  renderAutoSignals(kpis);
+
+  TILES.forEach(tile => {
+    const cv = document.getElementById(`cv_${tile.key}`);
+    const noteEl = document.getElementById(`note_${tile.key}`);
+    const errEl = document.getElementById(`err_${tile.key}`);
+    const lagEl = document.getElementById(`lag_${tile.key}`);
+
+    if (!cv || !noteEl || !errEl) return;
+
+    errEl.textContent = "";
+    noteEl.textContent = "";
+    if (lagEl) lagEl.textContent = "";
+
+    try {
+      const built = tile.build({ labelsYM, series, state });
+
+      const updatedYM = lastUpdatedYM(built.labelsYM, built.bar) || lastUpdatedYM(built.labelsYM, built.line);
+      const staleness = computeStaleness(updatedYM);
+      setTileUpdateBadges(tile.key, updatedYM, staleness);
+
+      const existing = chartsByKey.get(tile.key);
+      if (existing) { existing.destroy(); chartsByKey.delete(tile.key); }
+
+      let barData = built.bar.slice();
+      let lineData = built.line.slice();
+      if (state.smooth && state.smooth > 1) {
+        barData = rollingMA(barData, state.smooth);
+        lineData = rollingMA(lineData, state.smooth);
+      }
+
+      const chart = makeMixedBarLineChart(cv, built.labelsYM, barData, lineData, built.chartOpts);
+      chartsByKey.set(tile.key, chart);
+
+      noteEl.textContent = built.note || "";
+
+      if (lagEl) {
+        const nonNullCount = barData.filter(v => v !== null && v !== undefined).length;
+        if (nonNullCount < 36) lagEl.textContent = "Short history: plotting all available observations.";
+      }
+
+    } catch (e) {
+      errEl.textContent = String(e && e.message ? e.message : e);
+      console.error(tile.key, e);
+    }
+  });
+}
+
+/* =========================================================
+   MAIN LOAD
+========================================================= */
+async function reloadAll({ bypassCache=false } = {}) {
+  elErrText.textContent = "";
+  elStatusText.textContent = "Fetching series…";
+  elReload.disabled = true;
+
+  try {
+    const obs = await loadAllSeries({ bypassCache });
+
+    const usrecWindowed = sliceWindow(obs.USREC, state.window);
+    recessionRanges = recessionRangesFromUSREC(usrecWindowed);
+
+    const monthlyAligned = buildMonthlyAligned(obs, state.window);
+    const smoothed = applySmoothing(monthlyAligned, state.smooth);
+
+    labelsYMAll = smoothed.labelsYM;
+    rawMonthly = smoothed;
+
+    fetchInsights({ bypassCache });
+    renderAll();
+
+    const latestYM = labelsYMAll.length ? labelsYMAll[labelsYMAll.length-1] : null;
+    elStatusText.innerHTML =
+      `<span class="ok">Loaded</span> ${Object.keys(obs).length} series. Window: <b>${state.window}</b>. Latest month on x-axis: <b>${latestYM ? formatYM(latestYM) : "—"}</b>.`;
+
+  } catch (e) {
+    elStatusText.textContent = "Could not load data.";
+    elErrText.textContent = String(e && e.message ? e.message : e);
+    console.error(e);
+  } finally {
+    elReload.disabled = false;
+  }
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
+elRange.addEventListener("change", () => {
+  state.window = elRange.value;
+  reloadAll({ bypassCache: false });
+});
+
+elSmooth.addEventListener("change", () => {
+  state.smooth = Number(elSmooth.value || 0);
+  if (!Number.isFinite(state.smooth)) state.smooth = 0;
+  reloadAll({ bypassCache: false });
+});
+
+elDp.addEventListener("input", () => {
+  state.dpPct = Number(elDp.value || 0);
+  if (!Number.isFinite(state.dpPct)) state.dpPct = 20;
+  state.dpPct = Math.max(0, Math.min(50, state.dpPct));
+  elDpLabel.textContent = state.dpPct + "%";
+  renderAll();
+});
+
+elRefresh.addEventListener("click", () => {
+  clearAllLocalCache();
+  elStatusText.innerHTML = `<span class="warn">Local cache cleared.</span> Click “Reload data” to refetch from proxy.`;
+});
+
+elReload.addEventListener("click", () => {
+  reloadAll({ bypassCache: true });
+});
+
+/* =========================================================
+   BOOT
+========================================================= */
+renderTilesShell();
+elDpLabel.textContent = elDp.value + "%";
+reloadAll({ bypassCache: false });
 </script>
 
 </body>
