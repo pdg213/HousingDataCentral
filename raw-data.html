@@ -24,7 +24,13 @@
     .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
     .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
 
-    .btn-group { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+    .controls { display:flex; align-items:center; gap:12px; margin:16px 0; flex-wrap:wrap; }
+    .controls label { font-size:13px; color:var(--muted); }
+    .controls select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:#fff; }
+
+    .category { margin:16px 0 8px; }
+    .category-title { font-size:14px; font-weight:600; color:#333; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+    .btn-group { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
     .series-btn {
       padding:10px 16px; border:1px solid var(--border); border-radius:8px;
       background:#fff; cursor:pointer; font-size:13px; transition: all 0.15s;
@@ -57,13 +63,23 @@
     <h1>Raw Data Explorer</h1>
     <a href="index.html" class="back-btn">Back to Dashboard</a>
   </div>
-  <p class="sub">Select a data series to view the last 24 data points with year-over-year and quarter-over-quarter changes.</p>
+  <p class="sub">Select a data series and time range to view historical data with year-over-year and quarter-over-quarter changes.</p>
+
+  <div class="controls">
+    <label for="rangeSelect">Time Range:</label>
+    <select id="rangeSelect">
+      <option value="2">2 Years</option>
+      <option value="5">5 Years</option>
+      <option value="10">10 Years</option>
+      <option value="20" selected>20 Years</option>
+    </select>
+  </div>
 
   <div class="status" id="statusBox">
     <span class="loading">Select a series below to load data...</span>
   </div>
 
-  <div class="btn-group" id="seriesButtons"></div>
+  <div id="seriesContainer"></div>
 
   <div class="card" id="chartCard" style="display:none;">
     <h2 id="chartTitle">Chart</h2>
@@ -92,21 +108,44 @@
 <script>
 const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
 
-const SERIES_CONFIG = [
-  { id: "USAUCSFRCONDOSMSAMID", name: "Home Values (Zillow ZHVI)", unit: "$", decimals: 0 },
-  { id: "MORTGAGE30US", name: "30Y Mortgage Rate", unit: "%", decimals: 2 },
-  { id: "EXHOSLUSM495S", name: "Existing Home Sales (SAAR)", unit: "K", decimals: 0 },
-  { id: "HOSSUPUSM673N", name: "Existing Home Months Supply", unit: "mo", decimals: 1 },
-  { id: "HNFSEPUSSA", name: "New Homes for Sale", unit: "K", decimals: 0 },
-  { id: "MSACSR", name: "New Homes Months Supply", unit: "mo", decimals: 1 },
-  { id: "HOUST1F", name: "Single-Family Starts (SAAR)", unit: "K", decimals: 0 },
-  { id: "CES2023610001", name: "Residential Construction Workers", unit: "K", decimals: 0 },
-  { id: "UMCSENT", name: "Consumer Sentiment", unit: "", decimals: 1 },
-  { id: "UNRATE", name: "Unemployment Rate", unit: "%", decimals: 1 }
+const CATEGORIES = [
+  {
+    name: "New Home Sales Data",
+    series: [
+      { id: "HNFSEPUSSA", name: "New Homes for Sale", unit: "K", decimals: 0 },
+      { id: "MSACSR", name: "New Homes Months Supply", unit: "mo", decimals: 1 },
+      { id: "HOUST1F", name: "Single-Family Starts (SAAR)", unit: "K", decimals: 0 }
+    ]
+  },
+  {
+    name: "Existing Home Sales Data",
+    series: [
+      { id: "EXHOSLUSM495S", name: "Existing Home Sales (SAAR)", unit: "K", decimals: 0 },
+      { id: "HOSSUPUSM673N", name: "Existing Home Months Supply", unit: "mo", decimals: 1 },
+      { id: "USAUCSFRCONDOSMSAMID", name: "Home Values (Zillow ZHVI)", unit: "$", decimals: 0 }
+    ]
+  },
+  {
+    name: "Macro Data",
+    series: [
+      { id: "MORTGAGE30US", name: "30Y Mortgage Rate", unit: "%", decimals: 2 },
+      { id: "UNRATE", name: "Unemployment Rate", unit: "%", decimals: 1 },
+      { id: "CES2023610001", name: "Residential Construction Workers", unit: "K", decimals: 0 }
+    ]
+  },
+  {
+    name: "Consumer Data",
+    series: [
+      { id: "UMCSENT", name: "Consumer Sentiment", unit: "", decimals: 1 }
+    ]
+  }
 ];
+
+const SERIES_CONFIG = CATEGORIES.flatMap(cat => cat.series);
 
 let currentChart = null;
 let currentSeries = null;
+let cachedRawData = {};
 
 const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
 
@@ -160,26 +199,38 @@ async function fetchSeries(seriesId) {
   return obs;
 }
 
-function calculateChanges(data) {
+function getSelectedYears() {
+  return Number(document.getElementById("rangeSelect").value) || 20;
+}
+
+function filterByYears(monthly, years) {
+  if (!monthly.length) return [];
+  const latest = monthly[monthly.length - 1].date;
+  const cutoff = new Date(latest);
+  cutoff.setFullYear(cutoff.getFullYear() - years);
+  return monthly.filter(m => m.date >= cutoff);
+}
+
+function calculateChanges(data, years) {
   const result = [];
-  const monthly = toMonthlyAverage(data);
+  const allMonthly = toMonthlyAverage(data);
   
-  for (let i = 0; i < monthly.length; i++) {
-    const current = monthly[i];
+  for (let i = 0; i < allMonthly.length; i++) {
+    const current = allMonthly[i];
     let yoyChange = null;
     let qoqChange = null;
 
     if (i >= 12) {
-      const yearAgo = monthly[i - 12].value;
+      const yearAgo = allMonthly[i - 12].value;
       if (yearAgo !== 0) {
         yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
       }
     }
 
     if (i >= 3) {
-      const curr3mo = (monthly[i].value + monthly[i-1].value + monthly[i-2].value) / 3;
+      const curr3mo = (allMonthly[i].value + allMonthly[i-1].value + allMonthly[i-2].value) / 3;
       if (i >= 6) {
-        const prev3mo = (monthly[i-3].value + monthly[i-4].value + monthly[i-5].value) / 3;
+        const prev3mo = (allMonthly[i-3].value + allMonthly[i-4].value + allMonthly[i-5].value) / 3;
         if (prev3mo !== 0) {
           qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
         }
@@ -194,7 +245,7 @@ function calculateChanges(data) {
     });
   }
 
-  return result.slice(-24);
+  return filterByYears(result, years);
 }
 
 function formatValue(value, config) {
@@ -293,11 +344,12 @@ function renderChart(data, config) {
   });
 }
 
-async function loadSeries(seriesId) {
+async function loadSeries(seriesId, forceRefresh = false) {
   const config = SERIES_CONFIG.find(s => s.id === seriesId);
   const statusBox = document.getElementById("statusBox");
   const chartCard = document.getElementById("chartCard");
   const tableCard = document.getElementById("tableCard");
+  const years = getSelectedYears();
   
   statusBox.innerHTML = '<span class="loading">Loading data...</span>';
   chartCard.style.display = "none";
@@ -308,10 +360,18 @@ async function loadSeries(seriesId) {
   });
 
   try {
-    const rawData = await fetchSeries(seriesId);
-    const processedData = calculateChanges(rawData);
+    let rawData;
+    if (cachedRawData[seriesId] && !forceRefresh) {
+      rawData = cachedRawData[seriesId];
+    } else {
+      rawData = await fetchSeries(seriesId);
+      cachedRawData[seriesId] = rawData;
+    }
+    
+    const processedData = calculateChanges(rawData, years);
+    const dataCount = processedData.length;
 
-    document.getElementById("chartTitle").textContent = config.name + " (Last 24 Months)";
+    document.getElementById("chartTitle").textContent = config.name + ` (${years}Y View - ${dataCount} data points)`;
     document.getElementById("tableTitle").textContent = config.name + " - Data Table";
 
     renderChart(processedData, config);
@@ -319,7 +379,7 @@ async function loadSeries(seriesId) {
 
     chartCard.style.display = "block";
     tableCard.style.display = "block";
-    statusBox.innerHTML = `<span class="ok" style="color:#1a7f37;">Loaded ${config.name} - showing last 24 data points</span>`;
+    statusBox.innerHTML = `<span class="ok" style="color:#1a7f37;">Loaded ${config.name} - showing ${dataCount} data points (${years}Y)</span>`;
     currentSeries = seriesId;
 
   } catch (err) {
@@ -328,17 +388,41 @@ async function loadSeries(seriesId) {
   }
 }
 
+function refreshCurrentSeries() {
+  if (currentSeries) {
+    loadSeries(currentSeries);
+  }
+}
+
 function init() {
-  const btnGroup = document.getElementById("seriesButtons");
+  const container = document.getElementById("seriesContainer");
   
-  SERIES_CONFIG.forEach(series => {
-    const btn = document.createElement("button");
-    btn.className = "series-btn";
-    btn.textContent = series.name;
-    btn.dataset.id = series.id;
-    btn.addEventListener("click", () => loadSeries(series.id));
-    btnGroup.appendChild(btn);
+  CATEGORIES.forEach(category => {
+    const catDiv = document.createElement("div");
+    catDiv.className = "category";
+    
+    const title = document.createElement("div");
+    title.className = "category-title";
+    title.textContent = category.name;
+    catDiv.appendChild(title);
+    
+    const btnGroup = document.createElement("div");
+    btnGroup.className = "btn-group";
+    
+    category.series.forEach(series => {
+      const btn = document.createElement("button");
+      btn.className = "series-btn";
+      btn.textContent = series.name;
+      btn.dataset.id = series.id;
+      btn.addEventListener("click", () => loadSeries(series.id));
+      btnGroup.appendChild(btn);
+    });
+    
+    catDiv.appendChild(btnGroup);
+    container.appendChild(catDiv);
   });
+
+  document.getElementById("rangeSelect").addEventListener("change", refreshCurrentSeries);
 }
 
 init();
