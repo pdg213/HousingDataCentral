@@ -51,6 +51,27 @@
     .loading { color: var(--muted); }
 
     .legend-note { font-size:11px; color:var(--muted); margin-top:8px; }
+
+    .tabs { display:flex; gap:0; border-bottom:1px solid var(--border); margin-bottom:0; }
+    .tab-btn {
+      padding:10px 18px; border:none; background:none; cursor:pointer;
+      font-size:13px; color:var(--muted); border-bottom:2px solid transparent;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color:#111; }
+    .tab-btn.active { color:var(--primary); border-bottom-color:var(--primary); font-weight:500; }
+
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+
+    .data-table-container { max-height:400px; overflow-y:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    th { background:#f9f9f9; font-weight:600; text-align:right; position:sticky; top:0; }
+    th:first-child, td:first-child { text-align:left; }
+    tr:hover { background:#f5f8fc; }
+    .positive { color:#1a7f37; }
+    .negative { color:#b00020; }
   </style>
 </head>
 
@@ -131,6 +152,42 @@
       <canvas id="stockChart"></canvas>
     </div>
     <div class="legend-note">Levels shown in thousands (SAAR). Under Construction and Inventory are single-family only.</div>
+  </div>
+
+  <div class="card" id="dataCard" style="display:none;">
+    <h2>Raw Data</h2>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="permits">Permits</button>
+      <button class="tab-btn" data-tab="starts">Starts</button>
+      <button class="tab-btn" data-tab="sales">Sales</button>
+      <button class="tab-btn" data-tab="underConstruction">Under Const</button>
+      <button class="tab-btn" data-tab="inventory">Inventory</button>
+    </div>
+    <div id="tabPermits" class="tab-content active">
+      <div class="data-table-container">
+        <table><thead><tr><th>Date</th><th>Value</th><th>Y/Y Change</th><th>Q/Q Change</th></tr></thead><tbody id="tbodyPermits"></tbody></table>
+      </div>
+    </div>
+    <div id="tabStarts" class="tab-content">
+      <div class="data-table-container">
+        <table><thead><tr><th>Date</th><th>Value</th><th>Y/Y Change</th><th>Q/Q Change</th></tr></thead><tbody id="tbodyStarts"></tbody></table>
+      </div>
+    </div>
+    <div id="tabSales" class="tab-content">
+      <div class="data-table-container">
+        <table><thead><tr><th>Date</th><th>Value</th><th>Y/Y Change</th><th>Q/Q Change</th></tr></thead><tbody id="tbodySales"></tbody></table>
+      </div>
+    </div>
+    <div id="tabUnderConstruction" class="tab-content">
+      <div class="data-table-container">
+        <table><thead><tr><th>Date</th><th>Value</th><th>Y/Y Change</th><th>Q/Q Change</th></tr></thead><tbody id="tbodyUnderConstruction"></tbody></table>
+      </div>
+    </div>
+    <div id="tabInventory" class="tab-content">
+      <div class="data-table-container">
+        <table><thead><tr><th>Date</th><th>Value</th><th>Y/Y Change</th><th>Q/Q Change</th></tr></thead><tbody id="tbodyInventory"></tbody></table>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -275,6 +332,104 @@ function formatYoY(val) {
   if (val === null) return "N/A";
   const sign = val >= 0 ? "+" : "";
   return `${sign}${val.toFixed(1)}% YoY`;
+}
+
+function formatChange(value) {
+  if (value === null) return '<span style="color:var(--muted)">N/A</span>';
+  const sign = value >= 0 ? "+" : "";
+  const cls = value >= 0 ? "positive" : "negative";
+  return `<span class="${cls}">${sign}${value.toFixed(1)}%</span>`;
+}
+
+function calculateChanges(data, years) {
+  const result = [];
+  
+  for (let i = 0; i < data.length; i++) {
+    const current = data[i];
+    let yoyChange = null;
+    let qoqChange = null;
+
+    if (i >= 12) {
+      const yearAgo = data[i - 12].value;
+      if (yearAgo !== 0) {
+        yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
+      }
+    }
+
+    if (i >= 3) {
+      const curr3mo = (data[i].value + data[i-1].value + data[i-2].value) / 3;
+      if (i >= 6) {
+        const prev3mo = (data[i-3].value + data[i-4].value + data[i-5].value) / 3;
+        if (prev3mo !== 0) {
+          qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
+        }
+      }
+    }
+
+    result.push({
+      date: current.date,
+      value: current.value,
+      yoyChange,
+      qoqChange
+    });
+  }
+
+  return filterByYears(result, years);
+}
+
+function renderDataTable(data, tbodyId, unit) {
+  const tbody = document.getElementById(tbodyId);
+  tbody.innerHTML = "";
+
+  const reversed = [...data].reverse();
+  
+  reversed.forEach(row => {
+    const tr = document.createElement("tr");
+    let formattedValue;
+    if (unit === "K") {
+      formattedValue = row.value.toFixed(0) + "K";
+    } else {
+      formattedValue = row.value.toFixed(1);
+    }
+    tr.innerHTML = `
+      <td>${fmtMonth.format(row.date)}</td>
+      <td>${formattedValue}</td>
+      <td>${formatChange(row.yoyChange)}</td>
+      <td>${formatChange(row.qoqChange)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderAllDataTables() {
+  const years = getRangeYears();
+  
+  const permits = cachedData[SERIES_CONFIG.permits.id];
+  const starts = cachedData[SERIES_CONFIG.starts.id];
+  const sales = cachedData[SERIES_CONFIG.sales.id];
+  const underConst = cachedData[SERIES_CONFIG.underConstruction.id];
+  const inventory = cachedData[SERIES_CONFIG.inventory.id];
+
+  if (permits) renderDataTable(calculateChanges(permits, years), "tbodyPermits", "K");
+  if (starts) renderDataTable(calculateChanges(starts, years), "tbodyStarts", "K");
+  if (sales) renderDataTable(calculateChanges(sales, years), "tbodySales", "K");
+  if (underConst) renderDataTable(calculateChanges(underConst, years), "tbodyUnderConstruction", "K");
+  if (inventory) renderDataTable(calculateChanges(inventory, years), "tbodyInventory", "K");
+
+  document.getElementById("dataCard").style.display = "block";
+}
+
+function initTabs() {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      
+      btn.classList.add("active");
+      const tabId = "tab" + btn.dataset.tab.charAt(0).toUpperCase() + btn.dataset.tab.slice(1);
+      document.getElementById(tabId).classList.add("active");
+    });
+  });
 }
 
 function updateKPIs(permits, starts, sales, underConst) {
@@ -498,6 +653,8 @@ async function loadAllData() {
     flowChartCard.style.display = "block";
     stockChartCard.style.display = "block";
 
+    renderAllDataTables();
+
     const latestDate = fmtMonth.format(getLatestValue(starts)?.date || new Date());
     statusBox.innerHTML = `<span style="color:#1a7f37;">Pipeline data loaded successfully. Latest data: ${latestDate}</span>`;
 
@@ -522,12 +679,14 @@ function refreshCharts() {
   if (permits && starts && sales && underConst && inventory) {
     renderFlowChart(permits, starts, sales, indexYear, years);
     renderStockChart(underConst, inventory, years);
+    renderAllDataTables();
   }
 }
 
 function init() {
   document.getElementById("indexYearSelect").addEventListener("change", refreshCharts);
   document.getElementById("rangeSelect").addEventListener("change", refreshCharts);
+  initTabs();
   loadAllData();
 }
 
