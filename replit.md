@@ -32,6 +32,7 @@ node server.js
 - **Flow Chart**: Permits, Starts, Sales indexed to a selectable base year (2000-2024)
 - **Stock Chart**: Under Construction and Inventory levels with dual Y-axes
 - **KPI Cards**: Latest values with YoY changes and Backlog Ratio (months of pipeline)
+- **Raw Data Tabs**: Tabbed panel with data tables for each series showing Date, Value, Y/Y Change, Q/Q Change
 - Time range selector (5-20 years)
 
 ### Raw Data Explorer (raw-data.html)
