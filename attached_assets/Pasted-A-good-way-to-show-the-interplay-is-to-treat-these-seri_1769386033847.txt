@@ -1,0 +1,134 @@
+A good way to show the interplay is to treat these series as a pipeline (stock/flow) system and visualize it in two complementary views:
+
+a single “Pipeline Dashboard” tile that tells the story at a glance, and
+
+an optional “identity check” view that helps you diagnose why inventory/supply is moving (starts vs completions vs sales).
+
+Below are the structures that work best in practice.
+
+1) Pipeline view: “Flow + Stock” in one tile (best for decision-making)
+A. Two stacked charts (same x-axis)
+
+Top chart (Flows):
+
+Permits (SF) – leading indicator of intent
+
+Starts (SF) – production initiation
+
+New Home Sales (SF) – absorption / demand pull
+Use lines (not bars) and index them for comparability:
+
+Either YoY % for all three, or
+
+Index = 100 at a chosen date (e.g., 2019=100) so you see lead/lag cleanly.
+
+Bottom chart (Stocks):
+
+Homes Under Construction (SF) (stock)
+
+Optionally New Homes for Sale / Inventory (stock)
+Show as lines in levels (thousands).
+
+Why this works:
+
+Top chart shows momentum and sequencing (permits → starts → sales).
+
+Bottom chart shows where the backlog is building or clearing.
+
+B. Add a derived “backlog pressure” line (high value)
+
+Compute and overlay (on the bottom chart or as a small KPI):
+
+Under Construction / Sales (months of pipeline)
+
+Think of it like “months of work in process” given current demand.
+
+Alternatively: Starts – Sales (flow gap) smoothed 3M MA
+
+Positive = pipeline building; negative = pipeline clearing.
+
+This single derived measure usually explains most “why” questions.
+
+2) Identity check view: explain the stock change mechanically (best for diagnosis)
+
+There’s a basic accounting identity:
+
+Under Construction(t) = Under Construction(t-1) + Starts(t) – Completions(t)
+
+And separately, inventory pressure is influenced by:
+
+For Sale Inventory dynamics ≈ Completions(t) – Sales(t) (simplified)
+
+So you can build a diagnostic tile that shows:
+
+A. “Δ Under Construction” decomposition
+
+Line: Under Construction (level)
+
+Bars: Starts – Completions (monthly net additions to WIP)
+
+Optional: plot Δ Under Construction vs Starts – Completions to show they track.
+
+B. “Market clearing” decomposition
+
+Line: New Homes for Sale (inventory) or Months Supply
+
+Bars: Completions – Sales (net additions to for-sale inventory)
+
+Why this works:
+
+When users ask “inventory is up—why?”, this tells you whether it’s
+
+too many completions,
+
+too few sales,
+
+or earlier starts that are now flowing through.
+
+3) Normalization: how to make interrelated series comparable
+
+These series are in different units and levels, so you need a common scale. Best options:
+
+Option A (most intuitive): YoY % for flows + levels for stocks
+
+Flows: YoY % for permits/starts/sales
+
+Stocks: levels for under construction/inventory
+
+Option B (best for lead/lag visuals): index to 100
+
+Index permits/starts/sales to 100 at the same start date
+
+You’ll see permits lead, starts lag, sales respond to rates.
+
+Option C (most “quant”): z-scores
+
+(Value – 5Y mean) / 5Y stdev
+Great for regime detection, but less intuitive for casual viewing.
+
+For your audience and use-case, A + a backlog ratio is usually the best.
+
+4) Recommended “Pipeline module” layout for your dashboard
+Tile 7: “SF Pipeline: permits → starts → sales”
+
+Lines: permits, starts, sales (YoY % or indexed)
+
+Small KPIs: latest YoY for each + “lead/lag” note (e.g., permits turning up first)
+
+Tile 8: “Backlog & clearing”
+
+Lines: under construction (level), inventory (level) or months supply
+
+Bars: starts – completions, completions – sales (toggle)
+
+KPI: under construction / sales (months of pipeline)
+
+If you want just one tile: combine Tile 7 + 8 as a two-row tile.
+
+5) Practical implementation note (Chart.js)
+
+Chart.js doesn’t handle multi-panel charts in one canvas well without custom layout. The simplest approach is:
+
+one “Pipeline” card containing two <canvas> elements, same controls and window.
+
+This fits your current structure cleanly and avoids complex chart plugins.
