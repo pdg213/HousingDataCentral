@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>New Homes Pipeline - Housing Data Central</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --primary:#3c78c8;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+
+    .controls { display:flex; align-items:center; gap:16px; margin:16px 0; flex-wrap:wrap; }
+    .controls label { font-size:13px; color:var(--muted); }
+    .controls select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:#fff; }
+
+    .kpi-row { display:flex; flex-wrap:wrap; gap:12px; margin:16px 0; }
+    .kpi-card {
+      flex:1; min-width:140px; max-width:200px;
+      border:1px solid var(--border); border-radius:10px; padding:14px;
+      background:var(--card); box-shadow:var(--shadow);
+    }
+    .kpi-label { font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:4px; }
+    .kpi-value { font-size:22px; font-weight:600; color:#111; }
+    .kpi-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+    .kpi-value.positive { color:#1a7f37; }
+    .kpi-value.negative { color:#b00020; }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+    .chart-container { height: 280px; margin-bottom: 8px; }
+    canvas { width: 100% !important; height: 100% !important; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--card); box-shadow: var(--shadow); }
+    .error { color: #b00020; }
+    .loading { color: var(--muted); }
+
+    .legend-note { font-size:11px; color:var(--muted); margin-top:8px; }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>New Homes Pipeline Dashboard</h1>
+    <a href="index.html" class="back-btn">Back to Dashboard</a>
+  </div>
+  <p class="sub">Visualize the new home construction pipeline: permits → starts → sales, with inventory and backlog metrics.</p>
+
+  <div class="controls">
+    <label for="indexYearSelect">Index Base Year:</label>
+    <select id="indexYearSelect">
+      <option value="2024">2024</option>
+      <option value="2023">2023</option>
+      <option value="2022">2022</option>
+      <option value="2021">2021</option>
+      <option value="2020">2020</option>
+      <option value="2019" selected>2019</option>
+      <option value="2018">2018</option>
+      <option value="2015">2015</option>
+      <option value="2010">2010</option>
+      <option value="2005">2005</option>
+      <option value="2000">2000</option>
+    </select>
+    <label for="rangeSelect">Time Range:</label>
+    <select id="rangeSelect">
+      <option value="5">5 Years</option>
+      <option value="10" selected>10 Years</option>
+      <option value="15">15 Years</option>
+      <option value="20">20 Years</option>
+    </select>
+  </div>
+
+  <div class="status" id="statusBox">
+    <span class="loading">Loading pipeline data...</span>
+  </div>
+
+  <div class="kpi-row" id="kpiRow" style="display:none;">
+    <div class="kpi-card">
+      <div class="kpi-label">Permits (SF)</div>
+      <div class="kpi-value" id="kpiPermits">--</div>
+      <div class="kpi-sub" id="kpiPermitsYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Starts (SF)</div>
+      <div class="kpi-value" id="kpiStarts">--</div>
+      <div class="kpi-sub" id="kpiStartsYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">New Home Sales</div>
+      <div class="kpi-value" id="kpiSales">--</div>
+      <div class="kpi-sub" id="kpiSalesYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Under Construction</div>
+      <div class="kpi-value" id="kpiUnderConst">--</div>
+      <div class="kpi-sub" id="kpiUnderConstYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Backlog Ratio</div>
+      <div class="kpi-value" id="kpiBacklog">--</div>
+      <div class="kpi-sub">Under Const / Sales (months)</div>
+    </div>
+  </div>
+
+  <div class="card" id="flowChartCard" style="display:none;">
+    <h2>Pipeline Flows: Permits → Starts → Sales (Indexed)</h2>
+    <div class="chart-container">
+      <canvas id="flowChart"></canvas>
+    </div>
+    <div class="legend-note">All series indexed to <span id="indexYearLabel">2019</span> = 100. Higher values indicate growth relative to the base year.</div>
+  </div>
+
+  <div class="card" id="stockChartCard" style="display:none;">
+    <h2>Pipeline Stocks: Under Construction & Inventory (Levels)</h2>
+    <div class="chart-container">
+      <canvas id="stockChart"></canvas>
+    </div>
+    <div class="legend-note">Levels shown in thousands (SAAR). Under Construction and Inventory are single-family only.</div>
+  </div>
+
+<script>
+const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
+
+const SERIES_CONFIG = {
+  permits: { id: "PERMIT1", name: "SF Permits", unit: "K" },
+  starts: { id: "HOUST1F", name: "SF Starts", unit: "K" },
+  sales: { id: "HSN1F", name: "New Home Sales", unit: "K" },
+  underConstruction: { id: "UNDCON1USA", name: "Under Construction", unit: "K" },
+  inventory: { id: "HNFSEPUSSA", name: "New Homes for Sale", unit: "K" }
+};
+
+let flowChart = null;
+let stockChart = null;
+let cachedData = {};
+
+const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+
+function parseFredValue(v) {
+  if (v === "." || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ymdToDate(s) { return new Date(s + "T00:00:00"); }
+
+function monthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function toMonthlyAverage(obs) {
+  const bucket = new Map();
+  for (const o of obs) {
+    const k = monthKey(o.date);
+    const cur = bucket.get(k) || { sum: 0, count: 0, date: new Date(o.date.getFullYear(), o.date.getMonth(), 1) };
+    cur.sum += o.value;
+    cur.count += 1;
+    bucket.set(k, cur);
+  }
+  return Array.from(bucket.values())
+    .map(v => ({ date: v.date, value: v.sum / v.count }))
+    .sort((a,b) => a.date - b.date);
+}
+
+async function fetchSeries(seriesId) {
+  if (cachedData[seriesId]) return cachedData[seriesId];
+  
+  const url = new URL(PROXY_BASE);
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("file_type", "json");
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`${seriesId} failed (${resp.status}). Response:\n${txt}`);
+  }
+  const data = await resp.json();
+
+  if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response shape.`);
+  const obs = data.observations
+    .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+    .filter(o => o.value !== null)
+    .sort((a, b) => a.date - b.date);
+
+  if (!obs.length) throw new Error(`${seriesId}: no observations after filtering.`);
+  
+  cachedData[seriesId] = toMonthlyAverage(obs);
+  return cachedData[seriesId];
+}
+
+function getIndexYear() {
+  return Number(document.getElementById("indexYearSelect").value) || 2019;
+}
+
+function getRangeYears() {
+  return Number(document.getElementById("rangeSelect").value) || 10;
+}
+
+function filterByYears(data, years) {
+  if (!data.length) return [];
+  const latest = data[data.length - 1].date;
+  const cutoff = new Date(latest);
+  cutoff.setFullYear(cutoff.getFullYear() - years);
+  return data.filter(d => d.date >= cutoff);
+}
+
+function getBaseValue(data, indexYear) {
+  const yearData = data.filter(d => d.date.getFullYear() === indexYear);
+  if (yearData.length === 0) {
+    const closestYear = data.reduce((closest, d) => {
+      const diff = Math.abs(d.date.getFullYear() - indexYear);
+      const closestDiff = Math.abs(closest.date.getFullYear() - indexYear);
+      return diff < closestDiff ? d : closest;
+    }, data[0]);
+    return closestYear.value;
+  }
+  const sum = yearData.reduce((acc, d) => acc + d.value, 0);
+  return sum / yearData.length;
+}
+
+function indexData(data, indexYear) {
+  const baseValue = getBaseValue(data, indexYear);
+  return data.map(d => ({
+    date: d.date,
+    value: (d.value / baseValue) * 100,
+    rawValue: d.value
+  }));
+}
+
+function alignDates(datasets) {
+  const allDates = new Set();
+  datasets.forEach(ds => ds.forEach(d => allDates.add(d.date.getTime())));
+  const sortedDates = Array.from(allDates).sort((a, b) => a - b);
+  
+  return sortedDates.map(ts => {
+    const date = new Date(ts);
+    const values = datasets.map(ds => {
+      const match = ds.find(d => d.date.getTime() === ts);
+      return match ? match : null;
+    });
+    return { date, values };
+  });
+}
+
+function getLatestValue(data) {
+  if (!data.length) return null;
+  return data[data.length - 1];
+}
+
+function getYoYChange(data) {
+  if (data.length < 13) return null;
+  const current = data[data.length - 1].value;
+  const yearAgo = data[data.length - 13].value;
+  if (yearAgo === 0) return null;
+  return ((current - yearAgo) / yearAgo) * 100;
+}
+
+function formatYoY(val) {
+  if (val === null) return "N/A";
+  const sign = val >= 0 ? "+" : "";
+  return `${sign}${val.toFixed(1)}% YoY`;
+}
+
+function updateKPIs(permits, starts, sales, underConst) {
+  const latestPermits = getLatestValue(permits);
+  const latestStarts = getLatestValue(starts);
+  const latestSales = getLatestValue(sales);
+  const latestUnderConst = getLatestValue(underConst);
+
+  document.getElementById("kpiPermits").textContent = latestPermits ? `${latestPermits.value.toFixed(0)}K` : "--";
+  document.getElementById("kpiStarts").textContent = latestStarts ? `${latestStarts.value.toFixed(0)}K` : "--";
+  document.getElementById("kpiSales").textContent = latestSales ? `${latestSales.value.toFixed(0)}K` : "--";
+  document.getElementById("kpiUnderConst").textContent = latestUnderConst ? `${latestUnderConst.value.toFixed(0)}K` : "--";
+
+  const permitsYoY = getYoYChange(permits);
+  const startsYoY = getYoYChange(starts);
+  const salesYoY = getYoYChange(sales);
+  const underConstYoY = getYoYChange(underConst);
+
+  document.getElementById("kpiPermitsYoY").textContent = formatYoY(permitsYoY);
+  document.getElementById("kpiStartsYoY").textContent = formatYoY(startsYoY);
+  document.getElementById("kpiSalesYoY").textContent = formatYoY(salesYoY);
+  document.getElementById("kpiUnderConstYoY").textContent = formatYoY(underConstYoY);
+
+  if (latestUnderConst && latestSales && latestSales.value > 0) {
+    const backlogMonths = (latestUnderConst.value / (latestSales.value / 12)).toFixed(1);
+    document.getElementById("kpiBacklog").textContent = `${backlogMonths}`;
+  } else {
+    document.getElementById("kpiBacklog").textContent = "--";
+  }
+
+  [
+    { el: "kpiPermitsYoY", val: permitsYoY },
+    { el: "kpiStartsYoY", val: startsYoY },
+    { el: "kpiSalesYoY", val: salesYoY },
+    { el: "kpiUnderConstYoY", val: underConstYoY }
+  ].forEach(({ el, val }) => {
+    const elem = document.getElementById(el);
+    elem.classList.remove("positive", "negative");
+    if (val !== null) {
+      elem.classList.add(val >= 0 ? "positive" : "negative");
+    }
+  });
+}
+
+function renderFlowChart(permits, starts, sales, indexYear, years) {
+  const indexedPermits = indexData(filterByYears(permits, years), indexYear);
+  const indexedStarts = indexData(filterByYears(starts, years), indexYear);
+  const indexedSales = indexData(filterByYears(sales, years), indexYear);
+
+  const aligned = alignDates([indexedPermits, indexedStarts, indexedSales]);
+  const labels = aligned.map(a => fmtMonth.format(a.date));
+
+  if (flowChart) flowChart.destroy();
+
+  const ctx = document.getElementById("flowChart");
+  flowChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Permits (SF)",
+          data: aligned.map(a => a.values[0]?.value ?? null),
+          borderColor: "rgba(76, 175, 80, 0.9)",
+          backgroundColor: "rgba(76, 175, 80, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false
+        },
+        {
+          label: "Starts (SF)",
+          data: aligned.map(a => a.values[1]?.value ?? null),
+          borderColor: "rgba(33, 150, 243, 0.9)",
+          backgroundColor: "rgba(33, 150, 243, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false
+        },
+        {
+          label: "New Home Sales",
+          data: aligned.map(a => a.values[2]?.value ?? null),
+          borderColor: "rgba(255, 152, 0, 0.9)",
+          backgroundColor: "rgba(255, 152, 0, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? 'N/A'}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        y: {
+          title: { display: true, text: `Index (${indexYear} = 100)` },
+          ticks: { callback: (v) => v.toFixed(0) }
+        }
+      }
+    }
+  });
+}
+
+function renderStockChart(underConst, inventory, years) {
+  const filteredUnderConst = filterByYears(underConst, years);
+  const filteredInventory = filterByYears(inventory, years);
+
+  const aligned = alignDates([filteredUnderConst, filteredInventory]);
+  const labels = aligned.map(a => fmtMonth.format(a.date));
+
+  if (stockChart) stockChart.destroy();
+
+  const ctx = document.getElementById("stockChart");
+  stockChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Under Construction (SF)",
+          data: aligned.map(a => a.values[0]?.value ?? null),
+          borderColor: "rgba(156, 39, 176, 0.9)",
+          backgroundColor: "rgba(156, 39, 176, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          yAxisID: 'yLeft'
+        },
+        {
+          label: "New Homes for Sale",
+          data: aligned.map(a => a.values[1]?.value ?? null),
+          borderColor: "rgba(0, 188, 212, 0.9)",
+          backgroundColor: "rgba(0, 188, 212, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          yAxisID: 'yRight'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
+      plugins: {
+        legend: { display: true, position: 'top' },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(0) ?? 'N/A'}K`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        yLeft: {
+          position: 'left',
+          title: { display: true, text: 'Under Construction (K)' },
+          ticks: { callback: (v) => v.toFixed(0) + 'K' }
+        },
+        yRight: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: 'For Sale Inventory (K)' },
+          ticks: { callback: (v) => v.toFixed(0) + 'K' }
+        }
+      }
+    }
+  });
+}
+
+async function loadAllData() {
+  const statusBox = document.getElementById("statusBox");
+  const kpiRow = document.getElementById("kpiRow");
+  const flowChartCard = document.getElementById("flowChartCard");
+  const stockChartCard = document.getElementById("stockChartCard");
+
+  statusBox.innerHTML = '<span class="loading">Loading pipeline data...</span>';
+  kpiRow.style.display = "none";
+  flowChartCard.style.display = "none";
+  stockChartCard.style.display = "none";
+
+  try {
+    const [permits, starts, sales, underConst, inventory] = await Promise.all([
+      fetchSeries(SERIES_CONFIG.permits.id),
+      fetchSeries(SERIES_CONFIG.starts.id),
+      fetchSeries(SERIES_CONFIG.sales.id),
+      fetchSeries(SERIES_CONFIG.underConstruction.id),
+      fetchSeries(SERIES_CONFIG.inventory.id)
+    ]);
+
+    const indexYear = getIndexYear();
+    const years = getRangeYears();
+
+    document.getElementById("indexYearLabel").textContent = indexYear;
+
+    updateKPIs(permits, starts, sales, underConst);
+    renderFlowChart(permits, starts, sales, indexYear, years);
+    renderStockChart(underConst, inventory, years);
+
+    kpiRow.style.display = "flex";
+    flowChartCard.style.display = "block";
+    stockChartCard.style.display = "block";
+
+    const latestDate = fmtMonth.format(getLatestValue(starts)?.date || new Date());
+    statusBox.innerHTML = `<span style="color:#1a7f37;">Pipeline data loaded successfully. Latest data: ${latestDate}</span>`;
+
+  } catch (err) {
+    statusBox.innerHTML = `<span class="error">Error loading data: ${err.message}</span>`;
+    console.error(err);
+  }
+}
+
+function refreshCharts() {
+  const indexYear = getIndexYear();
+  const years = getRangeYears();
+
+  document.getElementById("indexYearLabel").textContent = indexYear;
+
+  const permits = cachedData[SERIES_CONFIG.permits.id];
+  const starts = cachedData[SERIES_CONFIG.starts.id];
+  const sales = cachedData[SERIES_CONFIG.sales.id];
+  const underConst = cachedData[SERIES_CONFIG.underConstruction.id];
+  const inventory = cachedData[SERIES_CONFIG.inventory.id];
+
+  if (permits && starts && sales && underConst && inventory) {
+    renderFlowChart(permits, starts, sales, indexYear, years);
+    renderStockChart(underConst, inventory, years);
+  }
+}
+
+function init() {
+  document.getElementById("indexYearSelect").addEventListener("change", refreshCharts);
+  document.getElementById("rangeSelect").addEventListener("change", refreshCharts);
+  loadAllData();
+}
+
+init();
+</script>
+
+</body>
+</html>
