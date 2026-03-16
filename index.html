@@ -66,6 +66,11 @@
 
     .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); }
     .card h2 { margin: 0 0 6px; font-size: 16px; }
+    .tile-header { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px; }
+    .tile-header h2 { margin: 0; }
+    .toggle-group { display: flex; gap: 4px; }
+    .toggle-btn { padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); cursor: pointer; font-size: 12px; color: var(--fg); }
+    .toggle-btn.active { background: var(--border); font-weight: 600; }
     .meta { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
     .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
     canvas { width: 100% !important; height: 280px !important; }
@@ -174,6 +179,8 @@ const SERIES = {
   NEW_MONTHS: "MSACSR",
 
   STARTS_SF: "HOUST1F",
+  STARTS_MF: "HOUST5F",
+  STARTS_ALL: "HOUST",
 
   RES_WORKERS: "CES2023610001",
 
@@ -729,32 +736,45 @@ const TILES = [
   {
     key: "t4_starts",
     title: "4) Single-Family Starts (SAAR) + YoY % (full line)",
-    meta: "Bars = single-family starts SAAR (left axis). Line = YoY % change (right axis).",
+    meta: "Bars = housing starts SAAR (left axis). Line = YoY % change (right axis).",
     pill: "Windowed",
-    build: ({ labelsYM, series }) => {
-      const starts = series.STARTS_SF;
+    hasStartsToggle: true,
+    build: ({ labelsYM, series, state }) => {
+      const modeMap = {
+        sf:  { data: series.STARTS_SF,  label: "Single-Family Starts", barLabel: "Single-family starts (SAAR)", ticker: "HOUST1F" },
+        mf:  { data: series.STARTS_MF,  label: "Multi-Family Starts",  barLabel: "Multi-family starts (SAAR)",  ticker: "HOUST5F" },
+        all: { data: series.STARTS_ALL, label: "All Housing Starts",   barLabel: "All housing starts (SAAR)",   ticker: "HOUST" }
+      };
+      const mode = modeMap[state.startsMode] || modeMap.sf;
+      const starts = mode.data;
       const yoy = computeYoYFromAligned(starts, 12);
       return {
         labelsYM,
         bar: starts,
         line: yoy,
         chartOpts: {
-          barLabel: "Single-family starts (SAAR)",
+          barLabel: mode.barLabel,
           lineLabel: "YoY % change",
           barAxisTitle: "Starts (SAAR)",
           lineAxisTitle: "YoY (%)",
           barTick: (v) => fmtNum0.format(v),
           lineTick: (v) => fmt1.format(v) + "%"
         },
-        note: "Starts: HOUST1F (SAAR). YoY computed as t vs t-12. Recession shading: USREC."
+        note: `Starts: ${mode.ticker} (SAAR). YoY computed as t vs t-12. Recession shading: USREC.`
       };
     },
-    kpi: ({ labelsYM, series }) => {
-      const starts = series.STARTS_SF;
+    kpi: ({ labelsYM, series, state }) => {
+      const modeMap = {
+        sf:  { data: series.STARTS_SF,  name: "Single-Family Starts" },
+        mf:  { data: series.STARTS_MF,  name: "Multi-Family Starts" },
+        all: { data: series.STARTS_ALL, name: "All Housing Starts" }
+      };
+      const mode = modeMap[state.startsMode] || modeMap.sf;
+      const starts = mode.data;
       const yoy = computeYoYFromAligned(starts, 12);
       const latestYoY = lastValue(yoy);
       return {
-        name: "Single-Family Starts",
+        name: mode.name,
         value: lastValue(starts),
         valueFmt: (x) => x === null ? "—" : fmtNum0.format(x),
         yoy: latestYoY,
@@ -850,7 +870,8 @@ const TILES = [
 const state = {
   window: elRange.value,
   smooth: Number(elSmooth.value),
-  dpPct: Number(elDp.value)
+  dpPct: Number(elDp.value),
+  startsMode: "sf"
 };
 
 let chartsByKey = new Map();
@@ -897,7 +918,19 @@ function buildTileShell(tile){
   const note = mk("div", { class:"note", id:`note_${tile.key}` }, "");
   const err = mk("div", { class:"tileErr", id:`err_${tile.key}` }, "");
 
-  card.appendChild(h2);
+  if (tile.hasStartsToggle) {
+    const header = mk("div", { class:"tile-header" }, [
+      h2,
+      mk("div", { class:"toggle-group", id:"startsToggle" }, [
+        mk("button", { class:"toggle-btn active", "data-mode":"sf" }, "SF"),
+        mk("button", { class:"toggle-btn", "data-mode":"mf" }, "MF"),
+        mk("button", { class:"toggle-btn", "data-mode":"all" }, "All")
+      ])
+    ]);
+    card.appendChild(header);
+  } else {
+    card.appendChild(h2);
+  }
   card.appendChild(meta);
   card.appendChild(statusRow);
   card.appendChild(canvas);
@@ -1046,6 +1079,8 @@ async function loadAllSeries({ bypassCache=false } = {}) {
     newInvRaw,
     newMonthsRaw,
     startsRaw,
+    startsMfRaw,
+    startsAllRaw,
     resWorkersRaw,
     sentimentRaw,
     unrateRaw,
@@ -1058,6 +1093,8 @@ async function loadAllSeries({ bypassCache=false } = {}) {
     fetchSeries(SERIES.NEW_INV, { bypassCache }),
     fetchSeries(SERIES.NEW_MONTHS, { bypassCache }),
     fetchSeries(SERIES.STARTS_SF, { bypassCache }),
+    fetchSeries(SERIES.STARTS_MF, { bypassCache }),
+    fetchSeries(SERIES.STARTS_ALL, { bypassCache }),
     fetchSeries(SERIES.RES_WORKERS, { bypassCache }),
     fetchSeries(SERIES.SENTIMENT, { bypassCache }),
     fetchSeries(SERIES.UNRATE, { bypassCache }),
@@ -1072,6 +1109,8 @@ async function loadAllSeries({ bypassCache=false } = {}) {
     NEW_INV: newInvRaw,
     NEW_MONTHS: newMonthsRaw,
     STARTS_SF: startsRaw,
+    STARTS_MF: startsMfRaw,
+    STARTS_ALL: startsAllRaw,
     RES_WORKERS: resWorkersRaw,
     SENTIMENT: sentimentRaw,
     UNRATE: unrateRaw,
@@ -1234,6 +1273,21 @@ elReload.addEventListener("click", () => {
    BOOT
 ========================================================= */
 renderTilesShell();
+
+const startsToggleNames = { sf: "Single-Family Starts", mf: "Multi-Family Starts", all: "All Housing Starts" };
+document.getElementById("startsToggle").addEventListener("click", (e) => {
+  const btn = e.target.closest(".toggle-btn");
+  if (!btn) return;
+  const mode = btn.dataset.mode;
+  if (mode === state.startsMode) return;
+  state.startsMode = mode;
+  document.querySelectorAll("#startsToggle .toggle-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  const h2 = document.querySelector("#card_t4_starts h2");
+  if (h2) h2.textContent = `4) ${startsToggleNames[mode]} (SAAR) + YoY % (full line)`;
+  renderAll();
+});
+
 elDpLabel.textContent = elDp.value + "%";
 reloadAll({ bypassCache: false });
 </script>
