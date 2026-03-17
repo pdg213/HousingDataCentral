@@ -475,9 +475,9 @@ function updateKPIs(permits, starts, sales, underConst) {
 }
 
 function renderFlowChart(permits, starts, sales, indexYear, years) {
-  const indexedPermits = indexData(filterByYears(permits, years), indexYear);
-  const indexedStarts = indexData(filterByYears(starts, years), indexYear);
-  const indexedSales = indexData(filterByYears(sales, years), indexYear);
+  const indexedPermits = filterByYears(permits, years);
+  const indexedStarts = filterByYears(starts, years);
+  const indexedSales = filterByYears(sales, years);
 
   const aligned = alignDates([indexedPermits, indexedStarts, indexedSales]);
   const labels = aligned.map(a => fmtMonth.format(a.date));
@@ -533,14 +533,14 @@ function renderFlowChart(permits, starts, sales, indexYear, years) {
         legend: { display: true, position: 'top' },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? 'N/A'}`
+            label: (ctx) => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}K`
           }
         }
       },
       scales: {
         x: { ticks: { maxTicksLimit: 12 } },
         y: {
-          title: { display: true, text: `Index (${indexYear} = 100)` },
+          title: { display: true, text: "Thousands (SAAR)" },
           ticks: { callback: (v) => v.toFixed(0) }
         }
       }
@@ -692,6 +692,10 @@ function init() {
 
 init();
 </script>
+
+<footer style="margin-top:24px; padding:12px 0; border-top:1px solid var(--border); text-align:center; color:var(--muted); font-size:12px;">
+  Built by Patrick Grow
+</footer>
 
 </body>
 </html>
