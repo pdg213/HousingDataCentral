@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Housing Equities - Housing Data Central</title>
+
+  <style>
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --primary:#3c78c8;
+      --good:#1a7f37;
+      --bad:#b00020;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--card); box-shadow: var(--shadow); }
+    .error { color: #b00020; }
+    .loading { color: var(--muted); }
+
+    .table-container { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    th { background:#f9f9f9; font-weight:600; position:sticky; top:0; cursor:pointer; user-select:none; }
+    th:first-child, td:first-child { text-align:left; }
+    th:nth-child(2), td:nth-child(2) { text-align:left; }
+    tr:hover { background:#f5f8fc; }
+    .positive { color: var(--good); }
+    .negative { color: var(--bad); }
+
+    .sector-tag {
+      display:inline-block; font-size:11px; padding:2px 8px;
+      border:1px solid var(--border); border-radius:999px; background:#fafafa;
+    }
+    .sector-tag.homebuilder { border-color: rgba(33,150,243,0.4); background: rgba(33,150,243,0.06); }
+    .sector-tag.building-products { border-color: rgba(76,175,80,0.4); background: rgba(76,175,80,0.06); }
+    .sector-tag.home-improvement { border-color: rgba(255,152,0,0.4); background: rgba(255,152,0,0.06); }
+    .sector-tag.housing-tech { border-color: rgba(156,39,176,0.4); background: rgba(156,39,176,0.06); }
+
+    .sort-arrow { font-size:10px; margin-left:4px; }
+
+    .commentary-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:12px; }
+    .commentary-card { border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--card); }
+    .commentary-card h3 { margin:0 0 8px; font-size:14px; }
+    .commentary-card p { margin:0; font-size:13px; color:var(--muted); line-height:1.5; }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>Housing Equities</h1>
+    <div style="display:flex; gap:8px;">
+      <a href="index.html" class="back-btn">Back to Dashboard</a>
+      <a href="new-homes.html" class="back-btn">New Homes Pipeline</a>
+    </div>
+  </div>
+  <p class="sub">Top housing-related equities with valuation metrics and recent performance. Data refreshed on page load.</p>
+
+  <div class="status" id="statusBox">
+    <span class="loading">Loading equity data...</span>
+  </div>
+
+  <div class="card" id="tableCard" style="display:none;">
+    <h2>Housing Equities Screener</h2>
+    <div class="table-container">
+      <table id="equityTable">
+        <thead>
+          <tr>
+            <th data-col="ticker">Ticker <span class="sort-arrow"></span></th>
+            <th data-col="name">Company <span class="sort-arrow"></span></th>
+            <th data-col="sector">Sector <span class="sort-arrow"></span></th>
+            <th data-col="price">Price <span class="sort-arrow"></span></th>
+            <th data-col="change">Day Chg <span class="sort-arrow"></span></th>
+            <th data-col="ytdChange">YTD <span class="sort-arrow"></span></th>
+            <th data-col="marketCap">Mkt Cap <span class="sort-arrow"></span></th>
+            <th data-col="pe">P/E <span class="sort-arrow"></span></th>
+            <th data-col="evEbitda">EV/EBITDA <span class="sort-arrow"></span></th>
+            <th data-col="evRevenue">EV/Revenue <span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="equityBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="commentaryCard" style="display:none;">
+    <h2>Sector Commentary</h2>
+    <div class="commentary-grid" id="commentaryGrid"></div>
+  </div>
+
+<script>
+const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
+
+const EQUITIES = [
+  { ticker: "DHI",  name: "D.R. Horton",         sector: "Homebuilder" },
+  { ticker: "LEN",  name: "Lennar",               sector: "Homebuilder" },
+  { ticker: "PHM",  name: "PulteGroup",            sector: "Homebuilder" },
+  { ticker: "NVR",  name: "NVR Inc",               sector: "Homebuilder" },
+  { ticker: "TOL",  name: "Toll Brothers",          sector: "Homebuilder" },
+  { ticker: "KBH",  name: "KB Home",               sector: "Homebuilder" },
+  { ticker: "MTH",  name: "Meritage Homes",        sector: "Homebuilder" },
+  { ticker: "TMHC", name: "Taylor Morrison",       sector: "Homebuilder" },
+  { ticker: "MHO",  name: "M/I Homes",             sector: "Homebuilder" },
+  { ticker: "GRBK", name: "Green Brick Partners",  sector: "Homebuilder" },
+  { ticker: "BLDR", name: "Builders FirstSource",  sector: "Building Products" },
+  { ticker: "BECN", name: "Beacon Roofing",        sector: "Building Products" },
+  { ticker: "LOW",  name: "Lowe's",                sector: "Home Improvement" },
+  { ticker: "HD",   name: "Home Depot",            sector: "Home Improvement" },
+  { ticker: "ZG",   name: "Zillow Group",          sector: "Housing Tech" }
+];
+
+const SECTOR_COMMENTARY = {
+  "Homebuilder": "Homebuilders are the most direct play on new housing supply. Key drivers include mortgage rates, land availability, and construction costs. Watch for order trends, cancellation rates, and incentive levels in quarterly earnings.",
+  "Building Products": "Building products companies benefit from both new construction and repair/remodel activity. Revenue is tied to housing starts, permits, and existing home turnover. Margin sensitivity to lumber and raw material costs is a key risk factor.",
+  "Home Improvement": "Home improvement retailers benefit from aging housing stock and existing home sales activity. Same-store sales trends and pro vs. DIY mix are key metrics. Rising home equity supports renovation spending.",
+  "Housing Tech": "Housing technology platforms benefit from transaction volumes and advertising spend from agents and lenders. Watch for traffic trends, monetization per visit, and mortgage origination volumes as leading indicators."
+};
+
+let equityData = [];
+let sortCol = "marketCap";
+let sortDir = -1; // descending
+
+function sectorClass(sector) {
+  return sector.toLowerCase().replace(/\s+/g, "-");
+}
+
+function fmtNum(n, decimals = 0) {
+  if (n === null || n === undefined || isNaN(n)) return "N/A";
+  return n.toFixed(decimals);
+}
+
+function fmtPrice(n) {
+  if (n === null || n === undefined || isNaN(n)) return "N/A";
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtPct(n) {
+  if (n === null || n === undefined || isNaN(n)) return "N/A";
+  const sign = n >= 0 ? "+" : "";
+  const cls = n >= 0 ? "positive" : "negative";
+  return `<span class="${cls}">${sign}${n.toFixed(1)}%</span>`;
+}
+
+function fmtMarketCap(n) {
+  if (n === null || n === undefined || isNaN(n)) return "N/A";
+  if (n >= 1e12) return "$" + (n / 1e12).toFixed(1) + "T";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(0) + "M";
+  return "$" + n.toLocaleString();
+}
+
+function fmtMultiple(n) {
+  if (n === null || n === undefined || isNaN(n) || n <= 0) return "N/A";
+  return n.toFixed(1) + "x";
+}
+
+async function fetchEquityData() {
+  const symbols = EQUITIES.map(e => e.ticker).join(",");
+  const resp = await fetch(`${PROXY_BASE}/fmp?symbols=${symbols}`);
+  if (!resp.ok) throw new Error(`Proxy returned ${resp.status}`);
+  return resp.json();
+}
+
+function mergeData(apiData) {
+  return EQUITIES.map(eq => {
+    const quote = apiData.find(d => d.symbol === eq.ticker) || {};
+    return {
+      ticker: eq.ticker,
+      name: eq.name,
+      sector: eq.sector,
+      price: quote.price ?? null,
+      change: quote.changesPercentage ?? null,
+      ytdChange: quote.ytdChange ?? null,
+      marketCap: quote.marketCap ?? null,
+      pe: quote.pe ?? null,
+      evEbitda: quote.evEbitda ?? null,
+      evRevenue: quote.evRevenue ?? null
+    };
+  });
+}
+
+function renderTable() {
+  const sorted = [...equityData].sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (typeof va === "string") va = va.toLowerCase();
+    if (typeof vb === "string") vb = vb.toLowerCase();
+    if (va === null || va === undefined) return 1;
+    if (vb === null || vb === undefined) return -1;
+    if (va < vb) return -1 * sortDir;
+    if (va > vb) return 1 * sortDir;
+    return 0;
+  });
+
+  const tbody = document.getElementById("equityBody");
+  tbody.innerHTML = sorted.map(d => `
+    <tr>
+      <td><strong>${d.ticker}</strong></td>
+      <td>${d.name}</td>
+      <td><span class="sector-tag ${sectorClass(d.sector)}">${d.sector}</span></td>
+      <td>${fmtPrice(d.price)}</td>
+      <td>${fmtPct(d.change)}</td>
+      <td>${fmtPct(d.ytdChange)}</td>
+      <td>${fmtMarketCap(d.marketCap)}</td>
+      <td>${fmtNum(d.pe, 1)}${d.pe != null && !isNaN(d.pe) ? "x" : ""}</td>
+      <td>${fmtMultiple(d.evEbitda)}</td>
+      <td>${fmtMultiple(d.evRevenue)}</td>
+    </tr>
+  `).join("");
+
+  // Update sort arrows
+  document.querySelectorAll("#equityTable th").forEach(th => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.col === sortCol) {
+      arrow.textContent = sortDir === 1 ? " \u25B2" : " \u25BC";
+    } else {
+      arrow.textContent = "";
+    }
+  });
+}
+
+function renderCommentary() {
+  const grid = document.getElementById("commentaryGrid");
+  grid.innerHTML = Object.entries(SECTOR_COMMENTARY).map(([sector, text]) => `
+    <div class="commentary-card">
+      <h3><span class="sector-tag ${sectorClass(sector)}">${sector}</span></h3>
+      <p>${text}</p>
+    </div>
+  `).join("");
+  document.getElementById("commentaryCard").style.display = "block";
+}
+
+function initSortHandlers() {
+  document.querySelectorAll("#equityTable th").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (!col) return;
+      if (sortCol === col) {
+        sortDir *= -1;
+      } else {
+        sortCol = col;
+        sortDir = col === "ticker" || col === "name" || col === "sector" ? 1 : -1;
+      }
+      renderTable();
+    });
+  });
+}
+
+async function init() {
+  const statusBox = document.getElementById("statusBox");
+  const tableCard = document.getElementById("tableCard");
+
+  try {
+    const apiData = await fetchEquityData();
+    equityData = mergeData(Array.isArray(apiData) ? apiData : []);
+
+    if (equityData.every(d => d.price === null)) {
+      throw new Error("No price data returned");
+    }
+
+    renderTable();
+    renderCommentary();
+    tableCard.style.display = "block";
+
+    statusBox.innerHTML = `<span style="color:var(--good);">Loaded data for ${equityData.filter(d => d.price !== null).length} equities.</span>`;
+  } catch (err) {
+    console.error("Equity fetch error:", err);
+    // Show table with static info even if API fails
+    equityData = EQUITIES.map(eq => ({
+      ticker: eq.ticker, name: eq.name, sector: eq.sector,
+      price: null, change: null, ytdChange: null,
+      marketCap: null, pe: null, evEbitda: null, evRevenue: null
+    }));
+    renderTable();
+    renderCommentary();
+    tableCard.style.display = "block";
+
+    statusBox.innerHTML = `<span class="error">Could not load live equity data. Showing static list. Ensure the proxy /fmp endpoint is configured.</span>`;
+  }
+
+  initSortHandlers();
+}
+
+init();
+</script>
+
+<footer style="margin-top:24px; padding:12px 0; border-top:1px solid var(--border); text-align:center; color:var(--muted); font-size:12px;">
+  Built by Patrick Grow
+</footer>
+
+</body>
+</html>
