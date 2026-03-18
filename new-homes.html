@@ -78,25 +78,14 @@
 <body>
   <div class="header">
     <h1>New Homes Pipeline Dashboard</h1>
-    <a href="index.html" class="back-btn">Back to Dashboard</a>
+    <div style="display:flex; gap:8px;">
+      <a href="index.html" class="back-btn">Back to Dashboard</a>
+      <a href="equities.html" class="back-btn">Equities</a>
+    </div>
   </div>
   <p class="sub">Visualize the new home construction pipeline: permits → starts → sales, with inventory and backlog metrics.</p>
 
   <div class="controls">
-    <label for="indexYearSelect">Index Base Year:</label>
-    <select id="indexYearSelect">
-      <option value="2024">2024</option>
-      <option value="2023">2023</option>
-      <option value="2022">2022</option>
-      <option value="2021">2021</option>
-      <option value="2020">2020</option>
-      <option value="2019" selected>2019</option>
-      <option value="2018">2018</option>
-      <option value="2015">2015</option>
-      <option value="2010">2010</option>
-      <option value="2005">2005</option>
-      <option value="2000">2000</option>
-    </select>
     <label for="rangeSelect">Time Range:</label>
     <select id="rangeSelect">
       <option value="5">5 Years</option>
@@ -139,11 +128,11 @@
   </div>
 
   <div class="card" id="flowChartCard" style="display:none;">
-    <h2>Pipeline Flows: Permits → Starts → Sales (Indexed)</h2>
+    <h2>Pipeline Flows: Permits → Starts → Sales</h2>
     <div class="chart-container">
       <canvas id="flowChart"></canvas>
     </div>
-    <div class="legend-note">All series indexed to <span id="indexYearLabel">2019</span> = 100. Higher values indicate growth relative to the base year.</div>
+    <div class="legend-note">All series shown in thousands of units (SAAR). Hover for YoY % change.</div>
   </div>
 
   <div class="card" id="stockChartCard" style="display:none;">
@@ -261,10 +250,6 @@ async function fetchSeries(seriesId) {
   return cachedData[seriesId];
 }
 
-function getIndexYear() {
-  return Number(document.getElementById("indexYearSelect").value) || 2019;
-}
-
 function getRangeYears() {
   return Number(document.getElementById("rangeSelect").value) || 10;
 }
@@ -277,27 +262,22 @@ function filterByYears(data, years) {
   return data.filter(d => d.date >= cutoff);
 }
 
-function getBaseValue(data, indexYear) {
-  const yearData = data.filter(d => d.date.getFullYear() === indexYear);
-  if (yearData.length === 0) {
-    const closestYear = data.reduce((closest, d) => {
-      const diff = Math.abs(d.date.getFullYear() - indexYear);
-      const closestDiff = Math.abs(closest.date.getFullYear() - indexYear);
-      return diff < closestDiff ? d : closest;
-    }, data[0]);
-    return closestYear.value;
-  }
-  const sum = yearData.reduce((acc, d) => acc + d.value, 0);
-  return sum / yearData.length;
+function computeYoY(fullSeries, filteredSeries) {
+  return filteredSeries.map(d => {
+    const targetTime = new Date(d.date);
+    targetTime.setFullYear(targetTime.getFullYear() - 1);
+    const yearAgo = fullSeries.find(s =>
+      Math.abs(s.date.getTime() - targetTime.getTime()) < 45 * 86400000
+    );
+    if (!yearAgo || yearAgo.value === 0) return null;
+    return ((d.value - yearAgo.value) / yearAgo.value) * 100;
+  });
 }
 
-function indexData(data, indexYear) {
-  const baseValue = getBaseValue(data, indexYear);
-  return data.map(d => ({
-    date: d.date,
-    value: (d.value / baseValue) * 100,
-    rawValue: d.value
-  }));
+function formatYoYTooltip(yoyVal) {
+  if (yoyVal === null) return "";
+  const sign = yoyVal >= 0 ? "+" : "";
+  return ` (${sign}${yoyVal.toFixed(1)}% YoY)`;
 }
 
 function alignDates(datasets) {
@@ -474,12 +454,16 @@ function updateKPIs(permits, starts, sales, underConst) {
   });
 }
 
-function renderFlowChart(permits, starts, sales, indexYear, years) {
-  const indexedPermits = filterByYears(permits, years);
-  const indexedStarts = filterByYears(starts, years);
-  const indexedSales = filterByYears(sales, years);
+function renderFlowChart(permits, starts, sales, years) {
+  const filteredPermits = filterByYears(permits, years);
+  const filteredStarts = filterByYears(starts, years);
+  const filteredSales = filterByYears(sales, years);
 
-  const aligned = alignDates([indexedPermits, indexedStarts, indexedSales]);
+  const yoyPermits = computeYoY(permits, filteredPermits);
+  const yoyStarts = computeYoY(starts, filteredStarts);
+  const yoySales = computeYoY(sales, filteredSales);
+
+  const aligned = alignDates([filteredPermits, filteredStarts, filteredSales]);
   const labels = aligned.map(a => fmtMonth.format(a.date));
 
   if (flowChart) flowChart.destroy();
@@ -493,6 +477,7 @@ function renderFlowChart(permits, starts, sales, indexYear, years) {
         {
           label: "Permits (SF)",
           data: aligned.map(a => a.values[0]?.value ?? null),
+          yoyData: yoyPermits,
           borderColor: "rgba(76, 175, 80, 0.9)",
           backgroundColor: "rgba(76, 175, 80, 0.1)",
           tension: 0.2,
@@ -503,6 +488,7 @@ function renderFlowChart(permits, starts, sales, indexYear, years) {
         {
           label: "Starts (SF)",
           data: aligned.map(a => a.values[1]?.value ?? null),
+          yoyData: yoyStarts,
           borderColor: "rgba(33, 150, 243, 0.9)",
           backgroundColor: "rgba(33, 150, 243, 0.1)",
           tension: 0.2,
@@ -513,6 +499,7 @@ function renderFlowChart(permits, starts, sales, indexYear, years) {
         {
           label: "New Home Sales",
           data: aligned.map(a => a.values[2]?.value ?? null),
+          yoyData: yoySales,
           borderColor: "rgba(255, 152, 0, 0.9)",
           backgroundColor: "rgba(255, 152, 0, 0.1)",
           tension: 0.2,
@@ -533,7 +520,10 @@ function renderFlowChart(permits, starts, sales, indexYear, years) {
         legend: { display: true, position: 'top' },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}K`
+            label: (ctx) => {
+              const yoy = ctx.dataset.yoyData?.[ctx.dataIndex];
+              return `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}K${formatYoYTooltip(yoy)}`;
+            }
           }
         }
       },
@@ -552,6 +542,9 @@ function renderStockChart(underConst, inventory, years) {
   const filteredUnderConst = filterByYears(underConst, years);
   const filteredInventory = filterByYears(inventory, years);
 
+  const yoyUnderConst = computeYoY(underConst, filteredUnderConst);
+  const yoyInventory = computeYoY(inventory, filteredInventory);
+
   const aligned = alignDates([filteredUnderConst, filteredInventory]);
   const labels = aligned.map(a => fmtMonth.format(a.date));
 
@@ -566,6 +559,7 @@ function renderStockChart(underConst, inventory, years) {
         {
           label: "Under Construction (SF)",
           data: aligned.map(a => a.values[0]?.value ?? null),
+          yoyData: yoyUnderConst,
           borderColor: "rgba(156, 39, 176, 0.9)",
           backgroundColor: "rgba(156, 39, 176, 0.1)",
           tension: 0.2,
@@ -577,6 +571,7 @@ function renderStockChart(underConst, inventory, years) {
         {
           label: "New Homes for Sale",
           data: aligned.map(a => a.values[1]?.value ?? null),
+          yoyData: yoyInventory,
           borderColor: "rgba(0, 188, 212, 0.9)",
           backgroundColor: "rgba(0, 188, 212, 0.1)",
           tension: 0.2,
@@ -598,7 +593,10 @@ function renderStockChart(underConst, inventory, years) {
         legend: { display: true, position: 'top' },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(0) ?? 'N/A'}K`
+            label: (ctx) => {
+              const yoy = ctx.dataset.yoyData?.[ctx.dataIndex];
+              return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(0) ?? 'N/A'}K${formatYoYTooltip(yoy)}`;
+            }
           }
         }
       },
@@ -640,13 +638,10 @@ async function loadAllData() {
       fetchSeries(SERIES_CONFIG.inventory.id)
     ]);
 
-    const indexYear = getIndexYear();
     const years = getRangeYears();
 
-    document.getElementById("indexYearLabel").textContent = indexYear;
-
     updateKPIs(permits, starts, sales, underConst);
-    renderFlowChart(permits, starts, sales, indexYear, years);
+    renderFlowChart(permits, starts, sales, years);
     renderStockChart(underConst, inventory, years);
 
     kpiRow.style.display = "flex";
@@ -665,10 +660,7 @@ async function loadAllData() {
 }
 
 function refreshCharts() {
-  const indexYear = getIndexYear();
   const years = getRangeYears();
-
-  document.getElementById("indexYearLabel").textContent = indexYear;
 
   const permits = cachedData[SERIES_CONFIG.permits.id];
   const starts = cachedData[SERIES_CONFIG.starts.id];
@@ -677,14 +669,13 @@ function refreshCharts() {
   const inventory = cachedData[SERIES_CONFIG.inventory.id];
 
   if (permits && starts && sales && underConst && inventory) {
-    renderFlowChart(permits, starts, sales, indexYear, years);
+    renderFlowChart(permits, starts, sales, years);
     renderStockChart(underConst, inventory, years);
     renderAllDataTables();
   }
 }
 
 function init() {
-  document.getElementById("indexYearSelect").addEventListener("change", refreshCharts);
   document.getElementById("rangeSelect").addEventListener("change", refreshCharts);
   initTabs();
   loadAllData();
