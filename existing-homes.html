@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Existing Homes - Housing Data Central</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --primary:#3c78c8;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+
+    .kpi-row { display:flex; flex-wrap:wrap; gap:12px; margin:16px 0; }
+    .kpi-card {
+      flex:1; min-width:140px; max-width:200px;
+      border:1px solid var(--border); border-radius:10px; padding:14px;
+      background:var(--card); box-shadow:var(--shadow);
+    }
+    .kpi-label { font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:4px; }
+    .kpi-value { font-size:22px; font-weight:600; color:#111; }
+    .kpi-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+    .kpi-value.positive { color:#1a7f37; }
+    .kpi-value.negative { color:#b00020; }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+    .chart-container { height: 320px; margin-bottom: 8px; }
+    .chart-container-md { height: 280px; margin-bottom: 8px; }
+    canvas { width: 100% !important; height: 100% !important; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--card); box-shadow: var(--shadow); }
+    .error { color: #b00020; }
+    .loading { color: var(--muted); }
+
+    .legend-note { font-size:11px; color:var(--muted); margin-top:8px; }
+
+    .data-table-container { max-height:400px; overflow-y:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    th { background:#f9f9f9; font-weight:600; text-align:right; position:sticky; top:0; }
+    th:first-child, td:first-child { text-align:left; }
+    tr:hover { background:#f5f8fc; }
+    .positive { color:#1a7f37; }
+    .negative { color:#b00020; }
+
+    .group-header th { text-align:center; border-bottom:2px solid var(--border); background:#f0f4f8; font-size:12px; }
+    .sub-header th { text-align:center; font-size:11px; color:var(--muted); background:#f9f9f9; }
+    .consolidated-table td { font-size:12px; padding:6px 8px; text-align:right; }
+    .consolidated-table td:first-child { text-align:left; font-weight:500; }
+    .consolidated-table th[rowspan] { text-align:left; background:#f0f4f8; vertical-align:middle; }
+    .col-sep { border-left:2px solid var(--border); }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>Existing Homes Dashboard</h1>
+    <div style="display:flex; gap:8px;">
+      <a href="index.html" class="back-btn">Back to Dashboard</a>
+      <a href="new-homes.html" class="back-btn">New Homes Pipeline</a>
+    </div>
+  </div>
+  <p class="sub">Existing home inventory, sales pace, months of supply, and median prices from NAR via FRED.</p>
+
+  <div class="status" id="statusBox">
+    <span class="loading">Loading existing home data...</span>
+  </div>
+
+  <div class="kpi-row" id="kpiRow" style="display:none;">
+    <div class="kpi-card">
+      <div class="kpi-label">SF Inventory</div>
+      <div class="kpi-value" id="kpiInventory">--</div>
+      <div class="kpi-sub" id="kpiInventoryYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Existing Home Sales</div>
+      <div class="kpi-value" id="kpiSales">--</div>
+      <div class="kpi-sub" id="kpiSalesYoY">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Months of Supply</div>
+      <div class="kpi-value" id="kpiMonths">--</div>
+      <div class="kpi-sub" id="kpiMonthsSub">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Median Price</div>
+      <div class="kpi-value" id="kpiPrice">--</div>
+      <div class="kpi-sub" id="kpiPriceYoY">--</div>
+    </div>
+  </div>
+
+  <div class="card" id="seasonalCard" style="display:none;">
+    <h2>Single-Family Inventory — Seasonal Comparison</h2>
+    <div class="chart-container">
+      <canvas id="seasonalChart"></canvas>
+    </div>
+    <div class="legend-note">Existing single-family home inventory (thousands, NAR). Each line represents one calendar year.</div>
+  </div>
+
+  <div class="card" id="salesChartCard" style="display:none;">
+    <h2>Existing Home Sales & Months of Supply</h2>
+    <div class="chart-container-md">
+      <canvas id="salesChart"></canvas>
+    </div>
+    <div class="legend-note">Sales shown as SAAR in thousands. Months of supply on right axis. Shaded band: 4–6 months = balanced market.</div>
+  </div>
+
+  <div class="card" id="priceChartCard" style="display:none;">
+    <h2>Median Existing Home Sale Price</h2>
+    <div class="chart-container-md">
+      <canvas id="priceChart"></canvas>
+    </div>
+    <div class="legend-note">Median sales price of existing single-family homes (not seasonally adjusted). Source: NAR via FRED.</div>
+  </div>
+
+  <div class="card" id="yoyCard" style="display:none;">
+    <h2>Inventory Year-over-Year Change (Last 12 Months)</h2>
+    <div class="data-table-container">
+      <table id="yoyTable">
+        <thead>
+          <tr>
+            <th style="text-align:left;">Date</th>
+            <th>Inventory (K)</th>
+            <th>Y/Y Change</th>
+          </tr>
+        </thead>
+        <tbody id="yoyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="dataCard" style="display:none;">
+    <h2>Consolidated Data</h2>
+    <div class="data-table-container" style="overflow-x:auto; max-height:500px;">
+      <table id="consolidatedTable" class="consolidated-table">
+        <thead>
+          <tr class="group-header">
+            <th rowspan="2">Date</th>
+            <th colspan="3" class="col-sep">Inventory (SF)</th>
+            <th colspan="3" class="col-sep">Sales</th>
+            <th colspan="3" class="col-sep">Months Supply</th>
+            <th colspan="3" class="col-sep">Median Price</th>
+          </tr>
+          <tr class="sub-header">
+            <th class="col-sep">Val</th><th>YoY</th><th>QoQ</th>
+            <th class="col-sep">Val</th><th>YoY</th><th>QoQ</th>
+            <th class="col-sep">Val</th><th>YoY</th><th>QoQ</th>
+            <th class="col-sep">Val</th><th>YoY</th><th>QoQ</th>
+          </tr>
+        </thead>
+        <tbody id="consolidatedBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+const PROXY_BASE = "https://fred-proxy.patrick-grow.workers.dev";
+const CACHE_PREFIX = "fredcache_v2:";
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+const SERIES_CONFIG = {
+  inventory:    { id: "HSFINVUSM495N", name: "SF Inventory",      unit: "K", decimals: 0 },
+  sales:        { id: "EXHOSLUSM495S", name: "Existing Home Sales", unit: "K", decimals: 0 },
+  monthsSupply: { id: "HOSSUPUSM673N", name: "Months of Supply",  unit: "mo", decimals: 1 },
+  medianPrice:  { id: "MSPNHSUS",     name: "Median Price (SF)",  unit: "$",  decimals: 0 }
+};
+
+const YEAR_COLORS = {
+  2017: "#e0e0e0",
+  2018: "#d0d0d0",
+  2019: "#b8b8b8",
+  2020: "#a0a0a0",
+  2021: "#888888",
+  2022: "#f4a8a0",
+  2023: "#e88070",
+  2024: "#e05040",
+  2025: "#c62828",
+  2026: "#1a237e"
+};
+
+const MONTH_LABELS = ["January","February","March","April","May","June",
+                      "July","August","September","October","November","December"];
+
+let seasonalChart = null;
+let salesChart = null;
+let priceChart = null;
+
+const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+const fmtMoney = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const fmtNum = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+/* ---------- helpers ---------- */
+function parseFredValue(v) {
+  if (v === "." || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ymdToDate(s) { return new Date(s + "T00:00:00"); }
+
+function monthKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function toMonthlyAverage(obs) {
+  const bucket = new Map();
+  for (const o of obs) {
+    const k = monthKey(o.date);
+    const cur = bucket.get(k) || { sum: 0, count: 0, date: new Date(o.date.getFullYear(), o.date.getMonth(), 1) };
+    cur.sum += o.value;
+    cur.count += 1;
+    bucket.set(k, cur);
+  }
+  return Array.from(bucket.values())
+    .map(v => ({ date: v.date, value: v.sum / v.count }))
+    .sort((a, b) => a.date - b.date);
+}
+
+/* ---------- caching ---------- */
+function readCache(seriesId) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + seriesId);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (Date.now() - obj.savedAt > CACHE_TTL_MS) return null;
+    return obj.data;
+  } catch { return null; }
+}
+
+function writeCache(seriesId, data) {
+  try { localStorage.setItem(CACHE_PREFIX + seriesId, JSON.stringify({ savedAt: Date.now(), data })); }
+  catch { /* quota exceeded */ }
+}
+
+async function fetchSeries(seriesId) {
+  const cached = readCache(seriesId);
+  if (cached && Array.isArray(cached.observations)) {
+    const obs = cached.observations
+      .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+      .filter(o => o.value !== null)
+      .sort((a, b) => a.date - b.date);
+    if (obs.length) return toMonthlyAverage(obs);
+  }
+
+  const url = new URL(PROXY_BASE);
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("file_type", "json");
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) throw new Error(`${seriesId} failed (${resp.status})`);
+  const data = await resp.json();
+  if (!data || !Array.isArray(data.observations)) throw new Error(`${seriesId} unexpected response`);
+
+  writeCache(seriesId, data);
+
+  const obs = data.observations
+    .map(o => ({ date: ymdToDate(o.date), value: parseFredValue(o.value) }))
+    .filter(o => o.value !== null)
+    .sort((a, b) => a.date - b.date);
+  if (!obs.length) throw new Error(`${seriesId}: no observations`);
+  return toMonthlyAverage(obs);
+}
+
+/* ---------- data helpers ---------- */
+function getLatestValue(data) {
+  return data.length ? data[data.length - 1] : null;
+}
+
+function getYoYChange(data) {
+  if (data.length < 13) return null;
+  const current = data[data.length - 1].value;
+  const yearAgo = data[data.length - 13].value;
+  if (yearAgo === 0) return null;
+  return ((current - yearAgo) / yearAgo) * 100;
+}
+
+function formatYoY(val) {
+  if (val === null) return "N/A";
+  const sign = val >= 0 ? "+" : "";
+  return `${sign}${val.toFixed(1)}% YoY`;
+}
+
+function formatChange(value) {
+  if (value === null) return '<span style="color:var(--muted)">N/A</span>';
+  const sign = value >= 0 ? "+" : "";
+  const cls = value >= 0 ? "positive" : "negative";
+  return `<span class="${cls}">${sign}${value.toFixed(1)}%</span>`;
+}
+
+function filterByYears(data, years) {
+  if (!data.length) return [];
+  const latest = data[data.length - 1].date;
+  const cutoff = new Date(latest);
+  cutoff.setFullYear(cutoff.getFullYear() - years);
+  return data.filter(d => d.date >= cutoff);
+}
+
+function calculateChanges(data, years) {
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    const current = data[i];
+    let yoyChange = null;
+    let qoqChange = null;
+    if (i >= 12) {
+      const yearAgo = data[i - 12].value;
+      if (yearAgo !== 0) yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
+    }
+    if (i >= 6) {
+      const curr3mo = (data[i].value + data[i - 1].value + data[i - 2].value) / 3;
+      const prev3mo = (data[i - 3].value + data[i - 4].value + data[i - 5].value) / 3;
+      if (prev3mo !== 0) qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
+    }
+    result.push({ date: current.date, value: current.value, yoyChange, qoqChange });
+  }
+  return filterByYears(result, years);
+}
+
+/* ---------- seasonal chart ---------- */
+function groupByYear(monthly, startYear) {
+  const grouped = new Map();
+  for (const d of monthly) {
+    const y = d.date.getFullYear();
+    if (y < startYear) continue;
+    if (!grouped.has(y)) grouped.set(y, new Array(12).fill(null));
+    grouped.get(y)[d.date.getMonth()] = d.value;
+  }
+  return grouped;
+}
+
+function renderSeasonalChart(inventoryData) {
+  const currentYear = new Date().getFullYear();
+  const startYear = currentYear - 5;
+  const grouped = groupByYear(inventoryData, startYear);
+
+  const years = Array.from(grouped.keys()).sort();
+
+  const datasets = years.map(year => {
+    const isCurrent = year === currentYear;
+    const color = YEAR_COLORS[year] || (isCurrent ? "#1a237e" : "#999");
+    return {
+      label: String(year),
+      data: grouped.get(year),
+      borderColor: color,
+      backgroundColor: "transparent",
+      borderWidth: isCurrent ? 3 : 2,
+      pointRadius: isCurrent ? 3 : 0,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: false
+    };
+  });
+
+  if (seasonalChart) seasonalChart.destroy();
+
+  seasonalChart = new Chart(document.getElementById("seasonalChart"), {
+    type: "line",
+    data: { labels: MONTH_LABELS, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              return v != null ? `${ctx.dataset.label}: ${fmtNum.format(v)}K` : null;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          title: { display: true, text: "Inventory (Thousands)" },
+          ticks: { callback: v => fmtNum.format(v) + "K" }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- sales & months of supply chart ---------- */
+function renderSalesChart(salesData, monthsData) {
+  const filtered = filterByYears(salesData, 10);
+  const filteredMonths = filterByYears(monthsData, 10);
+
+  // Align by date
+  const dateMap = new Map();
+  for (const d of filtered) dateMap.set(d.date.getTime(), { sales: d.value, months: null });
+  for (const d of filteredMonths) {
+    const existing = dateMap.get(d.date.getTime());
+    if (existing) existing.months = d.value;
+    else dateMap.set(d.date.getTime(), { sales: null, months: d.value });
+  }
+
+  const sorted = Array.from(dateMap.entries()).sort((a, b) => a[0] - b[0]);
+  const labels = sorted.map(([ts]) => fmtMonth.format(new Date(ts)));
+  const salesValues = sorted.map(([, v]) => v.sales);
+  const monthsValues = sorted.map(([, v]) => v.months);
+
+  if (salesChart) salesChart.destroy();
+
+  // Balanced market band plugin
+  const balancedBand = {
+    id: "balancedBand",
+    beforeDraw(chart) {
+      const yRight = chart.scales.yRight;
+      if (!yRight) return;
+      const ctx = chart.ctx;
+      const top = yRight.getPixelForValue(6);
+      const bottom = yRight.getPixelForValue(4);
+      ctx.save();
+      ctx.fillStyle = "rgba(76, 175, 80, 0.08)";
+      ctx.fillRect(chart.chartArea.left, top, chart.chartArea.right - chart.chartArea.left, bottom - top);
+      ctx.restore();
+    }
+  };
+
+  salesChart = new Chart(document.getElementById("salesChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Existing Home Sales (SAAR, K)",
+          data: salesValues,
+          borderColor: "rgba(33, 150, 243, 0.9)",
+          backgroundColor: "rgba(33, 150, 243, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          yAxisID: "yLeft"
+        },
+        {
+          label: "Months of Supply",
+          data: monthsValues,
+          borderColor: "rgba(255, 152, 0, 0.9)",
+          backgroundColor: "rgba(255, 152, 0, 0.1)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: false,
+          yAxisID: "yRight"
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.datasetIndex === 0) return `Sales: ${Math.round(ctx.parsed.y)}K SAAR`;
+              return `Months Supply: ${ctx.parsed.y?.toFixed(1) ?? "N/A"}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        yLeft: {
+          position: "left",
+          title: { display: true, text: "Sales (Thousands, SAAR)" },
+          ticks: { callback: v => v.toFixed(0) }
+        },
+        yRight: {
+          position: "right",
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: "Months of Supply" },
+          ticks: { callback: v => v.toFixed(1) }
+        }
+      }
+    },
+    plugins: [balancedBand]
+  });
+}
+
+/* ---------- median price chart ---------- */
+function renderPriceChart(priceData) {
+  const filtered = filterByYears(priceData, 10);
+  const labels = filtered.map(d => fmtMonth.format(d.date));
+  const values = filtered.map(d => d.value);
+
+  // Compute YoY for tooltip
+  const yoyValues = filtered.map(d => {
+    const target = new Date(d.date);
+    target.setFullYear(target.getFullYear() - 1);
+    const ago = priceData.find(s => Math.abs(s.date.getTime() - target.getTime()) < 45 * 86400000);
+    if (!ago || ago.value === 0) return null;
+    return ((d.value - ago.value) / ago.value) * 100;
+  });
+
+  if (priceChart) priceChart.destroy();
+
+  priceChart = new Chart(document.getElementById("priceChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Median Price ($)",
+        data: values,
+        yoyData: yoyValues,
+        borderColor: "rgba(76, 175, 80, 0.9)",
+        backgroundColor: "rgba(76, 175, 80, 0.08)",
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 2,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const yoy = ctx.dataset.yoyData?.[ctx.dataIndex];
+              const yoyStr = yoy != null ? ` (${yoy >= 0 ? "+" : ""}${yoy.toFixed(1)}% YoY)` : "";
+              return `Median Price: ${fmtMoney.format(ctx.parsed.y)}${yoyStr}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 12 } },
+        y: {
+          title: { display: true, text: "Median Price ($)" },
+          ticks: { callback: v => "$" + (v / 1000).toFixed(0) + "K" }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- Y/Y table ---------- */
+function renderYoYTable(inventoryData) {
+  const tbody = document.getElementById("yoyBody");
+  const last12 = inventoryData.slice(-12).reverse();
+
+  tbody.innerHTML = last12.map(d => {
+    const target = new Date(d.date);
+    target.setFullYear(target.getFullYear() - 1);
+    const ago = inventoryData.find(s =>
+      s.date.getFullYear() === target.getFullYear() && s.date.getMonth() === target.getMonth()
+    );
+    let yoyHtml = '<span style="color:var(--muted)">N/A</span>';
+    if (ago && ago.value !== 0) {
+      const pct = ((d.value - ago.value) / ago.value) * 100;
+      const sign = pct >= 0 ? "+" : "";
+      const cls = pct >= 0 ? "positive" : "negative";
+      yoyHtml = `<span class="${cls}">${sign}${pct.toFixed(1)}%</span>`;
+    }
+    return `<tr><td>${fmtMonth.format(d.date)}</td><td>${fmtNum.format(d.value)}K</td><td>${yoyHtml}</td></tr>`;
+  }).join("");
+}
+
+/* ---------- consolidated table ---------- */
+function renderConsolidatedTable(allData) {
+  const seriesKeys = ["inventory", "sales", "monthsSupply", "medianPrice"];
+  const datasets = seriesKeys.map(key => {
+    const raw = allData[key];
+    return raw ? calculateChanges(raw, 3) : [];
+  });
+
+  const fmtVal = [
+    v => fmtNum.format(v) + "K",
+    v => fmtNum.format(v) + "K",
+    v => v.toFixed(1),
+    v => fmtMoney.format(v * 1000)
+  ];
+
+  const maps = datasets.map(ds => {
+    const m = new Map();
+    ds.forEach(d => m.set(d.date.getTime(), d));
+    return m;
+  });
+
+  const allDates = new Set();
+  datasets.forEach(ds => ds.forEach(d => allDates.add(d.date.getTime())));
+  const sortedDates = Array.from(allDates).sort((a, b) => b - a);
+
+  const tbody = document.getElementById("consolidatedBody");
+  tbody.innerHTML = sortedDates.map(ts => {
+    const date = new Date(ts);
+    const cells = maps.map((m, idx) => {
+      const d = m.get(ts);
+      if (!d) return '<td class="col-sep">-</td><td>-</td><td>-</td>';
+      return `<td class="col-sep">${fmtVal[idx](d.value)}</td><td>${formatChange(d.yoyChange)}</td><td>${formatChange(d.qoqChange)}</td>`;
+    }).join("");
+    return `<tr><td>${fmtMonth.format(date)}</td>${cells}</tr>`;
+  }).join("");
+}
+
+/* ---------- KPIs ---------- */
+function updateKPIs(allData) {
+  const inv = allData.inventory;
+  const sales = allData.sales;
+  const months = allData.monthsSupply;
+  const price = allData.medianPrice;
+
+  // Inventory
+  const latestInv = getLatestValue(inv);
+  const invYoY = getYoYChange(inv);
+  document.getElementById("kpiInventory").textContent = latestInv ? `${fmtNum.format(latestInv.value)}K` : "--";
+  const invYoYEl = document.getElementById("kpiInventoryYoY");
+  invYoYEl.textContent = formatYoY(invYoY);
+  invYoYEl.className = "kpi-sub" + (invYoY != null ? (invYoY >= 0 ? " positive" : " negative") : "");
+
+  // Sales
+  const latestSales = getLatestValue(sales);
+  const salesYoY = getYoYChange(sales);
+  document.getElementById("kpiSales").textContent = latestSales ? `${fmtNum.format(latestSales.value)}K` : "--";
+  const salesYoYEl = document.getElementById("kpiSalesYoY");
+  salesYoYEl.textContent = formatYoY(salesYoY);
+  salesYoYEl.className = "kpi-sub" + (salesYoY != null ? (salesYoY >= 0 ? " positive" : " negative") : "");
+
+  // Months of supply
+  const latestMonths = getLatestValue(months);
+  document.getElementById("kpiMonths").textContent = latestMonths ? latestMonths.value.toFixed(1) : "--";
+  const monthsSub = document.getElementById("kpiMonthsSub");
+  if (latestMonths) {
+    const v = latestMonths.value;
+    if (v < 4) { monthsSub.textContent = "Tight market (<4 mo)"; monthsSub.className = "kpi-sub negative"; }
+    else if (v <= 6) { monthsSub.textContent = "Balanced (4–6 mo)"; monthsSub.className = "kpi-sub positive"; }
+    else { monthsSub.textContent = "Loose market (>6 mo)"; monthsSub.className = "kpi-sub"; }
+  }
+
+  // Median price
+  const latestPrice = getLatestValue(price);
+  const priceYoY = getYoYChange(price);
+  document.getElementById("kpiPrice").textContent = latestPrice ? fmtMoney.format(latestPrice.value * 1000) : "--";
+  const priceYoYEl = document.getElementById("kpiPriceYoY");
+  priceYoYEl.textContent = formatYoY(priceYoY);
+  priceYoYEl.className = "kpi-sub" + (priceYoY != null ? (priceYoY >= 0 ? " positive" : " negative") : "");
+}
+
+/* ---------- main ---------- */
+async function loadAllData() {
+  const statusBox = document.getElementById("statusBox");
+  statusBox.innerHTML = '<span class="loading">Loading existing home data...</span>';
+
+  try {
+    const [inventory, sales, monthsSupply, medianPrice] = await Promise.all([
+      fetchSeries(SERIES_CONFIG.inventory.id),
+      fetchSeries(SERIES_CONFIG.sales.id),
+      fetchSeries(SERIES_CONFIG.monthsSupply.id),
+      fetchSeries(SERIES_CONFIG.medianPrice.id)
+    ]);
+
+    const allData = { inventory, sales, monthsSupply, medianPrice };
+
+    updateKPIs(allData);
+    renderSeasonalChart(inventory);
+    renderSalesChart(sales, monthsSupply);
+    renderPriceChart(medianPrice);
+    renderYoYTable(inventory);
+    renderConsolidatedTable(allData);
+
+    document.getElementById("kpiRow").style.display = "flex";
+    document.getElementById("seasonalCard").style.display = "block";
+    document.getElementById("salesChartCard").style.display = "block";
+    document.getElementById("priceChartCard").style.display = "block";
+    document.getElementById("yoyCard").style.display = "block";
+    document.getElementById("dataCard").style.display = "block";
+
+    const latestDate = fmtMonth.format(getLatestValue(inventory)?.date || new Date());
+    statusBox.innerHTML = `<span style="color:#1a7f37;">Data loaded successfully. Latest inventory data: ${latestDate}</span>`;
+
+  } catch (err) {
+    statusBox.innerHTML = `<span class="error">Error loading data: ${err.message}</span>`;
+    console.error(err);
+  }
+}
+
+loadAllData();
+</script>
+
+<footer style="margin-top:24px; padding:12px 0; border-top:1px solid var(--border); text-align:center; color:var(--muted); font-size:12px;">
+  Built by Patrick Grow
+</footer>
+
+</body>
+</html>
