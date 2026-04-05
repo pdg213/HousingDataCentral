@@ -127,7 +127,7 @@
     <div class="chart-container">
       <canvas id="seasonalChart"></canvas>
     </div>
-    <div class="legend-note">Existing home inventory (thousands, NAR — all types). Each line represents one calendar year.</div>
+    <div class="legend-note">Active listing count (Realtor.com via FRED). Each line represents one calendar year.</div>
   </div>
 
   <div class="card" id="salesChartCard" style="display:none;">
@@ -143,7 +143,7 @@
     <div class="chart-container-md">
       <canvas id="priceChart"></canvas>
     </div>
-    <div class="legend-note">Median sales price of existing homes (not seasonally adjusted). Source: U.S. Census Bureau via FRED.</div>
+    <div class="legend-note">Median sales price of houses sold (quarterly, not seasonally adjusted). Source: U.S. Census Bureau via FRED.</div>
   </div>
 
   <div class="card" id="yoyCard" style="display:none;">
@@ -153,7 +153,7 @@
         <thead>
           <tr>
             <th style="text-align:left;">Date</th>
-            <th>Inventory (K)</th>
+            <th>Active Listings</th>
             <th>Y/Y Change</th>
           </tr>
         </thead>
@@ -192,10 +192,10 @@ const CACHE_PREFIX = "fredcache_v2:";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 const SERIES_CONFIG = {
-  inventory:    { id: "HOSINVUSM495N", name: "Inventory",           unit: "K", decimals: 0 },
-  sales:        { id: "EXHOSLUSM495S", name: "Existing Home Sales", unit: "K", decimals: 0 },
+  inventory:    { id: "ACTLISCOUUS",   name: "Inventory",           unit: "#",  decimals: 0 },
+  sales:        { id: "EXHOSLUSM495S", name: "Existing Home Sales", unit: "K",  decimals: 0 },
   monthsSupply: { id: "HOSSUPUSM673N", name: "Months of Supply",   unit: "mo", decimals: 1 },
-  medianPrice:  { id: "MSPUS",         name: "Median Price",        unit: "$",  decimals: 0 }
+  medianPrice:  { id: "MSPUS",         name: "Median Price",        unit: "$",  decimals: 0, quarterly: true }
 };
 
 const YEAR_COLORS = {
@@ -303,10 +303,11 @@ function getLatestValue(data) {
   return data.length ? data[data.length - 1] : null;
 }
 
-function getYoYChange(data) {
-  if (data.length < 13) return null;
+function getYoYChange(data, isQuarterly) {
+  const lag = isQuarterly ? 5 : 13;
+  if (data.length < lag) return null;
   const current = data[data.length - 1].value;
-  const yearAgo = data[data.length - 13].value;
+  const yearAgo = data[data.length - lag].value;
   if (yearAgo === 0) return null;
   return ((current - yearAgo) / yearAgo) * 100;
 }
@@ -332,17 +333,23 @@ function filterByYears(data, years) {
   return data.filter(d => d.date >= cutoff);
 }
 
-function calculateChanges(data, years) {
+function calculateChanges(data, years, isQuarterly) {
+  const yoyLag = isQuarterly ? 4 : 12;
   const result = [];
   for (let i = 0; i < data.length; i++) {
     const current = data[i];
     let yoyChange = null;
     let qoqChange = null;
-    if (i >= 12) {
-      const yearAgo = data[i - 12].value;
+    if (i >= yoyLag) {
+      const yearAgo = data[i - yoyLag].value;
       if (yearAgo !== 0) yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
     }
-    if (i >= 6) {
+    if (isQuarterly) {
+      if (i >= 1) {
+        const prev = data[i - 1].value;
+        if (prev !== 0) qoqChange = ((current.value - prev) / prev) * 100;
+      }
+    } else if (i >= 6) {
       const curr3mo = (data[i].value + data[i - 1].value + data[i - 2].value) / 3;
       const prev3mo = (data[i - 3].value + data[i - 4].value + data[i - 5].value) / 3;
       if (prev3mo !== 0) qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
@@ -450,7 +457,7 @@ function renderSeasonalChart() {
           callbacks: {
             label: ctx => {
               const v = ctx.parsed.y;
-              return v != null ? `${ctx.dataset.label}: ${fmtNum.format(v)}K` : null;
+              return v != null ? `${ctx.dataset.label}: ${fmtNum.format(v)}` : null;
             }
           }
         }
@@ -458,8 +465,8 @@ function renderSeasonalChart() {
       scales: {
         x: { grid: { display: false } },
         y: {
-          title: { display: true, text: "Inventory (Thousands)" },
-          ticks: { callback: v => fmtNum.format(v) + "K" }
+          title: { display: true, text: "Active Listings" },
+          ticks: { callback: v => (v / 1000).toFixed(0) + "K" }
         }
       }
     }
@@ -594,9 +601,10 @@ function renderPriceChart(priceData) {
         borderColor: "rgba(76, 175, 80, 0.9)",
         backgroundColor: "rgba(76, 175, 80, 0.08)",
         tension: 0.2,
-        pointRadius: 0,
+        pointRadius: 2,
         borderWidth: 2,
-        fill: true
+        fill: true,
+        spanGaps: true
       }]
     },
     options: {
@@ -644,7 +652,7 @@ function renderYoYTable(inventoryData) {
       const cls = pct >= 0 ? "positive" : "negative";
       yoyHtml = `<span class="${cls}">${sign}${pct.toFixed(1)}%</span>`;
     }
-    return `<tr><td>${fmtMonth.format(d.date)}</td><td>${fmtNum.format(d.value)}K</td><td>${yoyHtml}</td></tr>`;
+    return `<tr><td>${fmtMonth.format(d.date)}</td><td>${fmtNum.format(d.value)}</td><td>${yoyHtml}</td></tr>`;
   }).join("");
 }
 
@@ -653,12 +661,13 @@ function renderConsolidatedTable(allData) {
   const seriesKeys = ["inventory", "sales", "monthsSupply", "medianPrice"];
   const datasets = seriesKeys.map(key => {
     const raw = allData[key];
-    return raw ? calculateChanges(raw, 3) : [];
+    const isQ = SERIES_CONFIG[key]?.quarterly || false;
+    return raw ? calculateChanges(raw, 3, isQ) : [];
   });
 
   const fmtVal = [
-    v => fmtNum.format(v) + "K",
-    v => fmtNum.format(v) + "K",
+    v => fmtNum.format(v),
+    v => fmtNum.format(v),
     v => v.toFixed(1),
     v => fmtMoney.format(v)
   ];
@@ -695,7 +704,7 @@ function updateKPIs(allData) {
   // Inventory
   const latestInv = getLatestValue(inv);
   const invYoY = getYoYChange(inv);
-  document.getElementById("kpiInventory").textContent = latestInv ? `${fmtNum.format(latestInv.value)}K` : "--";
+  document.getElementById("kpiInventory").textContent = latestInv ? fmtNum.format(latestInv.value) : "--";
   const invYoYEl = document.getElementById("kpiInventoryYoY");
   invYoYEl.textContent = formatYoY(invYoY);
   invYoYEl.className = "kpi-sub" + (invYoY != null ? (invYoY >= 0 ? " positive" : " negative") : "");
@@ -703,7 +712,7 @@ function updateKPIs(allData) {
   // Sales
   const latestSales = getLatestValue(sales);
   const salesYoY = getYoYChange(sales);
-  document.getElementById("kpiSales").textContent = latestSales ? `${fmtNum.format(latestSales.value)}K` : "--";
+  document.getElementById("kpiSales").textContent = latestSales ? fmtNum.format(latestSales.value) : "--";
   const salesYoYEl = document.getElementById("kpiSalesYoY");
   salesYoYEl.textContent = formatYoY(salesYoY);
   salesYoYEl.className = "kpi-sub" + (salesYoY != null ? (salesYoY >= 0 ? " positive" : " negative") : "");
@@ -719,9 +728,9 @@ function updateKPIs(allData) {
     else { monthsSub.textContent = "Loose market (>6 mo)"; monthsSub.className = "kpi-sub"; }
   }
 
-  // Median price
+  // Median price (quarterly)
   const latestPrice = getLatestValue(price);
-  const priceYoY = getYoYChange(price);
+  const priceYoY = getYoYChange(price, true);
   document.getElementById("kpiPrice").textContent = latestPrice ? fmtMoney.format(latestPrice.value) : "--";
   const priceYoYEl = document.getElementById("kpiPriceYoY");
   priceYoYEl.textContent = formatYoY(priceYoY);
