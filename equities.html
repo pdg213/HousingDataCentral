@@ -22,7 +22,7 @@
     .sub { color: var(--muted); margin: 0 0 16px; }
 
     .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
-    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+    .nav-select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:#fff; cursor:pointer; }
 
     .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
     .card h2 { margin: 0 0 12px; font-size: 16px; }
@@ -62,11 +62,13 @@
 <body>
   <div class="header">
     <h1>Housing Equities</h1>
-    <div style="display:flex; gap:8px;">
-      <a href="index.html" class="back-btn">Back to Dashboard</a>
-      <a href="existing-homes.html" class="back-btn">Existing Homes</a>
-      <a href="new-homes.html" class="back-btn">New Homes Pipeline</a>
-    </div>
+    <select class="nav-select" onchange="if(this.value)window.location.href=this.value">
+      <option value="index.html">Housing Dashboard</option>
+      <option value="new-homes.html">New Homes Pipeline</option>
+      <option value="existing-homes.html">Existing Homes</option>
+      <option value="equities.html" selected>Housing Equities</option>
+      <option value="raw-data.html">Raw Data Explorer</option>
+    </select>
   </div>
   <p class="sub">Top housing-related equities with valuation metrics and recent performance. Data refreshed on page load.</p>
 

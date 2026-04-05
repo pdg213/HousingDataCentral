@@ -22,7 +22,7 @@
     .sub { color: var(--muted); margin: 0 0 16px; }
 
     .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
-    .back-btn { padding:8px 16px; background:var(--primary); color:#fff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:500; }
+    .nav-select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:#fff; cursor:pointer; }
 
     .controls { display:flex; align-items:center; gap:16px; margin:16px 0; flex-wrap:wrap; }
     .controls label { font-size:13px; color:var(--muted); }
@@ -78,10 +78,13 @@
 <body>
   <div class="header">
     <h1>Existing Homes Dashboard</h1>
-    <div style="display:flex; gap:8px;">
-      <a href="index.html" class="back-btn">Back to Dashboard</a>
-      <a href="new-homes.html" class="back-btn">New Homes Pipeline</a>
-    </div>
+    <select class="nav-select" onchange="if(this.value)window.location.href=this.value">
+      <option value="index.html">Housing Dashboard</option>
+      <option value="new-homes.html">New Homes Pipeline</option>
+      <option value="existing-homes.html" selected>Existing Homes</option>
+      <option value="equities.html">Housing Equities</option>
+      <option value="raw-data.html">Raw Data Explorer</option>
+    </select>
   </div>
   <p class="sub">Existing home inventory, sales pace, months of supply, and median prices from NAR via FRED.</p>
 
@@ -130,6 +133,24 @@
     <div class="legend-note">Active listing count (Realtor.com via FRED). Each line represents one calendar year.</div>
   </div>
 
+  <div class="card" id="newListingsCard" style="display:none;">
+    <h2>New Listings — Seasonal Comparison</h2>
+    <div class="controls" style="margin:0 0 12px;">
+      <label>Presets:</label>
+      <select id="nlYearPreset">
+        <option value="recent">Recent (5 yr)</option>
+        <option value="decade">Decade (10 yr)</option>
+        <option value="all">All Available</option>
+        <option value="custom">Custom</option>
+      </select>
+      <div class="year-toggles" id="nlYearToggles"></div>
+    </div>
+    <div class="chart-container">
+      <canvas id="newListingsChart"></canvas>
+    </div>
+    <div class="legend-note">New listings added to market each month (Realtor.com via FRED). Each line represents one calendar year.</div>
+  </div>
+
   <div class="card" id="salesChartCard" style="display:none;">
     <h2>Existing Home Sales & Months of Supply</h2>
     <div class="chart-container-md">
@@ -143,7 +164,7 @@
     <div class="chart-container-md">
       <canvas id="priceChart"></canvas>
     </div>
-    <div class="legend-note">Median sales price of houses sold (quarterly, not seasonally adjusted). Source: U.S. Census Bureau via FRED.</div>
+    <div class="legend-note">Median sales price of existing homes (monthly, not seasonally adjusted). Source: National Association of Realtors via FRED.</div>
   </div>
 
   <div class="card" id="dataCard" style="display:none;">
@@ -179,7 +200,8 @@ const SERIES_CONFIG = {
   inventory:    { id: "ACTLISCOUUS",   name: "Inventory",           unit: "#",  decimals: 0 },
   sales:        { id: "EXHOSLUSM495S", name: "Existing Home Sales", unit: "K",  decimals: 0 },
   monthsSupply: { id: "HOSSUPUSM673N", name: "Months of Supply",   unit: "mo", decimals: 1 },
-  medianPrice:  { id: "MSPUS",         name: "Median Price",        unit: "$",  decimals: 0, quarterly: true }
+  medianPrice:  { id: "HOSMEDUSM052N", name: "Median Price",        unit: "$",  decimals: 0 },
+  newListings:  { id: "NEWLISCOUUS",  name: "New Listings",        unit: "#",  decimals: 0 }
 };
 
 const YEAR_COLORS = {
@@ -201,8 +223,13 @@ const MONTH_LABELS = ["January","February","March","April","May","June",
                       "July","August","September","October","November","December"];
 
 let seasonalChart = null;
+let newListingsChart = null;
 let salesChart = null;
 let priceChart = null;
+
+let nlActiveYears = new Set();
+let nlAvailableYears = [];
+let newListingsDataCache = null;
 
 const fmtMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
 const fmtMoney = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -287,11 +314,10 @@ function getLatestValue(data) {
   return data.length ? data[data.length - 1] : null;
 }
 
-function getYoYChange(data, isQuarterly) {
-  const lag = isQuarterly ? 5 : 13;
-  if (data.length < lag) return null;
+function getYoYChange(data) {
+  if (data.length < 13) return null;
   const current = data[data.length - 1].value;
-  const yearAgo = data[data.length - lag].value;
+  const yearAgo = data[data.length - 13].value;
   if (yearAgo === 0) return null;
   return ((current - yearAgo) / yearAgo) * 100;
 }
@@ -317,23 +343,17 @@ function filterByYears(data, years) {
   return data.filter(d => d.date >= cutoff);
 }
 
-function calculateChanges(data, years, isQuarterly) {
-  const yoyLag = isQuarterly ? 4 : 12;
+function calculateChanges(data, years) {
   const result = [];
   for (let i = 0; i < data.length; i++) {
     const current = data[i];
     let yoyChange = null;
     let qoqChange = null;
-    if (i >= yoyLag) {
-      const yearAgo = data[i - yoyLag].value;
+    if (i >= 12) {
+      const yearAgo = data[i - 12].value;
       if (yearAgo !== 0) yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
     }
-    if (isQuarterly) {
-      if (i >= 1) {
-        const prev = data[i - 1].value;
-        if (prev !== 0) qoqChange = ((current.value - prev) / prev) * 100;
-      }
-    } else if (i >= 6) {
+    if (i >= 6) {
       const curr3mo = (data[i].value + data[i - 1].value + data[i - 2].value) / 3;
       const prev3mo = (data[i - 3].value + data[i - 4].value + data[i - 5].value) / 3;
       if (prev3mo !== 0) qoqChange = ((curr3mo - prev3mo) / prev3mo) * 100;
@@ -436,7 +456,43 @@ function renderSeasonalChart() {
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { display: true, position: "top" },
+        legend: {
+          display: true, position: "top",
+          onHover: (evt, legendItem) => {
+            const chart = seasonalChart;
+            if (!chart) return;
+            chart.data.datasets.forEach((ds, i) => {
+              if (!ds._origBorderColor) {
+                ds._origBorderColor = ds.borderColor;
+                ds._origBorderWidth = ds.borderWidth;
+                ds._origPointRadius = ds.pointRadius;
+              }
+              if (i === legendItem.datasetIndex) {
+                ds.borderWidth = 4;
+                ds.pointRadius = 4;
+                ds.borderColor = ds._origBorderColor;
+              } else {
+                ds.borderWidth = 1;
+                ds.pointRadius = 0;
+                ds.borderColor = ds._origBorderColor + "30";
+              }
+            });
+            chart.update("none");
+            evt.native.target.style.cursor = "pointer";
+          },
+          onLeave: (evt) => {
+            const chart = seasonalChart;
+            if (!chart) return;
+            chart.data.datasets.forEach(ds => {
+              if (ds._origBorderColor) {
+                ds.borderColor = ds._origBorderColor;
+                ds.borderWidth = ds._origBorderWidth;
+                ds.pointRadius = ds._origPointRadius;
+              }
+            });
+            chart.update("none");
+          }
+        },
         tooltip: {
           callbacks: {
             label: ctx => {
@@ -450,6 +506,137 @@ function renderSeasonalChart() {
         x: { grid: { display: false } },
         y: {
           title: { display: true, text: "Active Listings" },
+          ticks: { callback: v => (v / 1000).toFixed(0) + "K" }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- new listings seasonal chart ---------- */
+function buildNlYearToggles() {
+  const container = document.getElementById("nlYearToggles");
+  container.innerHTML = "";
+  nlAvailableYears.forEach(year => {
+    const btn = document.createElement("button");
+    btn.className = "year-btn" + (nlActiveYears.has(year) ? " active" : "");
+    btn.textContent = year;
+    btn.addEventListener("click", () => {
+      if (nlActiveYears.has(year)) nlActiveYears.delete(year);
+      else nlActiveYears.add(year);
+      document.getElementById("nlYearPreset").value = "custom";
+      buildNlYearToggles();
+      renderNewListingsChart();
+    });
+    container.appendChild(btn);
+  });
+}
+
+function applyNlPreset(preset) {
+  const currentYear = new Date().getFullYear();
+  nlActiveYears.clear();
+  if (preset === "recent") {
+    nlAvailableYears.filter(y => y >= currentYear - 5).forEach(y => nlActiveYears.add(y));
+  } else if (preset === "decade") {
+    nlAvailableYears.filter(y => y >= currentYear - 10).forEach(y => nlActiveYears.add(y));
+  } else if (preset === "all") {
+    nlAvailableYears.forEach(y => nlActiveYears.add(y));
+  }
+  buildNlYearToggles();
+  renderNewListingsChart();
+}
+
+function initNewListingsControls(data) {
+  newListingsDataCache = data;
+  const grouped = groupByYear(data);
+  nlAvailableYears = Array.from(grouped.keys()).sort();
+  const currentYear = new Date().getFullYear();
+  nlAvailableYears.filter(y => y >= currentYear - 5).forEach(y => nlActiveYears.add(y));
+  buildNlYearToggles();
+  document.getElementById("nlYearPreset").addEventListener("change", e => {
+    if (e.target.value !== "custom") applyNlPreset(e.target.value);
+  });
+}
+
+function renderNewListingsChart() {
+  if (!newListingsDataCache) return;
+  const currentYear = new Date().getFullYear();
+  const grouped = groupByYear(newListingsDataCache);
+  const years = Array.from(nlActiveYears).sort();
+
+  const datasets = years.map(year => {
+    const isCurrent = year === currentYear;
+    const fallbackColors = ["#666","#888","#aaa","#ccc","#e05040","#c62828","#1a237e"];
+    const color = YEAR_COLORS[year] || fallbackColors[year % fallbackColors.length];
+    return {
+      label: String(year),
+      data: grouped.get(year) || new Array(12).fill(null),
+      borderColor: color,
+      backgroundColor: "transparent",
+      borderWidth: isCurrent ? 3 : 2,
+      pointRadius: isCurrent ? 3 : 0,
+      pointHoverRadius: 5,
+      tension: 0.3,
+      spanGaps: false
+    };
+  });
+
+  if (newListingsChart) newListingsChart.destroy();
+
+  newListingsChart = new Chart(document.getElementById("newListingsChart"), {
+    type: "line",
+    data: { labels: MONTH_LABELS, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true, position: "top",
+          onHover: (evt, legendItem) => {
+            const chart = newListingsChart;
+            if (!chart) return;
+            chart.data.datasets.forEach((ds, i) => {
+              if (!ds._origBorderColor) {
+                ds._origBorderColor = ds.borderColor;
+                ds._origBorderWidth = ds.borderWidth;
+                ds._origPointRadius = ds.pointRadius;
+              }
+              if (i === legendItem.datasetIndex) {
+                ds.borderWidth = 4; ds.pointRadius = 4; ds.borderColor = ds._origBorderColor;
+              } else {
+                ds.borderWidth = 1; ds.pointRadius = 0; ds.borderColor = ds._origBorderColor + "30";
+              }
+            });
+            chart.update("none");
+            evt.native.target.style.cursor = "pointer";
+          },
+          onLeave: (evt) => {
+            const chart = newListingsChart;
+            if (!chart) return;
+            chart.data.datasets.forEach(ds => {
+              if (ds._origBorderColor) {
+                ds.borderColor = ds._origBorderColor;
+                ds.borderWidth = ds._origBorderWidth;
+                ds.pointRadius = ds._origPointRadius;
+              }
+            });
+            chart.update("none");
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              return v != null ? `${ctx.dataset.label}: ${fmtNum.format(v)}` : null;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: {
+          title: { display: true, text: "New Listings" },
           ticks: { callback: v => (v / 1000).toFixed(0) + "K" }
         }
       }
@@ -585,10 +772,9 @@ function renderPriceChart(priceData) {
         borderColor: "rgba(76, 175, 80, 0.9)",
         backgroundColor: "rgba(76, 175, 80, 0.08)",
         tension: 0.2,
-        pointRadius: 2,
+        pointRadius: 0,
         borderWidth: 2,
-        fill: true,
-        spanGaps: true
+        fill: true
       }]
     },
     options: {
@@ -623,8 +809,7 @@ function renderConsolidatedTable(allData) {
   const seriesKeys = ["inventory", "sales", "monthsSupply", "medianPrice"];
   const datasets = seriesKeys.map(key => {
     const raw = allData[key];
-    const isQ = SERIES_CONFIG[key]?.quarterly || false;
-    return raw ? calculateChanges(raw, 3, isQ) : [];
+    return raw ? calculateChanges(raw, 3) : [];
   });
 
   const fmtVal = [
@@ -690,9 +875,9 @@ function updateKPIs(allData) {
     else { monthsSub.textContent = "Loose market (>6 mo)"; monthsSub.className = "kpi-sub"; }
   }
 
-  // Median price (quarterly)
+  // Median price
   const latestPrice = getLatestValue(price);
-  const priceYoY = getYoYChange(price, true);
+  const priceYoY = getYoYChange(price);
   document.getElementById("kpiPrice").textContent = latestPrice ? fmtMoney.format(latestPrice.value) : "--";
   const priceYoYEl = document.getElementById("kpiPriceYoY");
   priceYoYEl.textContent = formatYoY(priceYoY);
@@ -705,11 +890,12 @@ async function loadAllData() {
   statusBox.innerHTML = '<span class="loading">Loading existing home data...</span>';
 
   try {
-    const [inventory, sales, monthsSupply, medianPrice] = await Promise.all([
+    const [inventory, sales, monthsSupply, medianPrice, newListings] = await Promise.all([
       fetchSeries(SERIES_CONFIG.inventory.id),
       fetchSeries(SERIES_CONFIG.sales.id),
       fetchSeries(SERIES_CONFIG.monthsSupply.id),
-      fetchSeries(SERIES_CONFIG.medianPrice.id)
+      fetchSeries(SERIES_CONFIG.medianPrice.id),
+      fetchSeries(SERIES_CONFIG.newListings.id)
     ]);
 
     const allData = { inventory, sales, monthsSupply, medianPrice };
@@ -717,12 +903,15 @@ async function loadAllData() {
     updateKPIs(allData);
     initSeasonalControls(inventory);
     renderSeasonalChart();
+    initNewListingsControls(newListings);
+    renderNewListingsChart();
     renderSalesChart(sales, monthsSupply);
     renderPriceChart(medianPrice);
     renderConsolidatedTable(allData);
 
     document.getElementById("kpiRow").style.display = "flex";
     document.getElementById("seasonalCard").style.display = "block";
+    document.getElementById("newListingsCard").style.display = "block";
     document.getElementById("salesChartCard").style.display = "block";
     document.getElementById("priceChartCard").style.display = "block";
     document.getElementById("dataCard").style.display = "block";
