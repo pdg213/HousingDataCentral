@@ -22,7 +22,10 @@
     .sub { color: var(--muted); margin: 0 0 16px; }
 
     .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
-    .nav-select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:14px; background:#fff; cursor:pointer; }
+    .nav-bar { display:flex; gap:6px; flex-wrap:wrap; }
+    .nav-btn { padding:8px 14px; border:1px solid var(--border); border-radius:8px; font-size:13px; font-weight:500; background:#fff; color:#555; text-decoration:none; cursor:pointer; transition: all 0.15s; }
+    .nav-btn:hover { background:#f0f4f8; color:#111; }
+    .nav-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
 
     .controls { display:flex; align-items:center; gap:12px; margin:16px 0; flex-wrap:wrap; }
     .controls label { font-size:13px; color:var(--muted); }
@@ -61,13 +64,13 @@
 <body>
   <div class="header">
     <h1>Raw Data Explorer</h1>
-    <select class="nav-select" onchange="if(this.value)window.location.href=this.value">
-      <option value="index.html">Housing Dashboard</option>
-      <option value="new-homes.html">New Homes Pipeline</option>
-      <option value="existing-homes.html">Existing Homes</option>
-      <option value="equities.html">Housing Equities</option>
-      <option value="raw-data.html" selected>Raw Data Explorer</option>
-    </select>
+    <div class="nav-bar">
+      <a href="index.html" class="nav-btn">Dashboard</a>
+      <a href="new-homes.html" class="nav-btn">New Homes</a>
+      <a href="existing-homes.html" class="nav-btn">Existing Homes</a>
+      <a href="equities.html" class="nav-btn">Equities</a>
+      <a href="raw-data.html" class="nav-btn active">Raw Data</a>
+    </div>
   </div>
   <p class="sub">Select a data series and time range to view historical data with year-over-year and quarter-over-quarter changes.</p>
 
