@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mortgages - Housing Data Central</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --border:#e6e6e6;
+      --muted:#666;
+      --bg:#ffffff;
+      --card:#ffffff;
+      --shadow: 0 1px 10px rgba(0,0,0,0.04);
+      --primary:#3c78c8;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 22px; line-height: 1.35; background: var(--bg); color:#111; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .sub { color: var(--muted); margin: 0 0 16px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px; }
+    .nav-bar { display:flex; gap:6px; flex-wrap:wrap; }
+    .nav-btn { padding:8px 14px; border:1px solid var(--border); border-radius:8px; font-size:13px; font-weight:500; background:#fff; color:#555; text-decoration:none; cursor:pointer; transition: all 0.15s; }
+    .nav-btn:hover { background:#f0f4f8; color:#111; }
+    .nav-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+
+    .kpi-row { display:flex; flex-wrap:wrap; gap:12px; margin:16px 0; }
+    .kpi-card {
+      flex:1; min-width:120px; max-width:180px;
+      border:1px solid var(--border); border-radius:10px; padding:14px;
+      background:var(--card); box-shadow:var(--shadow);
+    }
+    .kpi-label { font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:4px; }
+    .kpi-value { font-size:22px; font-weight:600; color:#111; }
+    .kpi-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+
+    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--card); box-shadow: var(--shadow); margin-bottom:16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+
+    .chart-container { height: 380px; margin-bottom: 8px; }
+    .chart-container-md { height: 320px; margin-bottom: 8px; }
+    canvas { width: 100% !important; height: 100% !important; }
+
+    .status { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 14px 0; background: var(--card); box-shadow: var(--shadow); }
+    .error { color: #b00020; }
+    .loading { color: var(--muted); }
+
+    .legend-note { font-size:11px; color:var(--muted); margin-top:8px; }
+
+    .data-table-container { max-height:400px; overflow-y:auto; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { padding:8px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    th { background:#f9f9f9; font-weight:600; text-align:right; position:sticky; top:0; }
+    th:first-child, td:first-child { text-align:left; }
+    tr:hover { background:#f5f8fc; }
+    .positive { color:#1a7f37; }
+    .negative { color:#b00020; }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h1>Mortgage Rate Distribution</h1>
+    <div class="nav-bar">
+      <a href="index.html" class="nav-btn">Dashboard</a>
+      <a href="new-homes.html" class="nav-btn">New Homes</a>
+      <a href="existing-homes.html" class="nav-btn">Existing Homes</a>
+      <a href="mortgages.html" class="nav-btn active">Mortgages</a>
+      <a href="equities.html" class="nav-btn">Equities</a>
+      <a href="raw-data.html" class="nav-btn">Raw Data</a>
+    </div>
+  </div>
+  <p class="sub">Percent of closed-end, first-lien mortgages outstanding by interest rate. Source: FHFA National Mortgage Database (NMDB), quarterly.</p>
+
+  <div class="status" id="statusBox">
+    <span class="loading">Loading FHFA mortgage data...</span>
+  </div>
+
+  <div class="kpi-row" id="kpiRow" style="display:none;">
+    <div class="kpi-card">
+      <div class="kpi-label">Below 3%</div>
+      <div class="kpi-value" id="kpiBelow3">--</div>
+      <div class="kpi-sub" id="kpiBelow3Sub">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">3% – 4%</div>
+      <div class="kpi-value" id="kpi3to4">--</div>
+      <div class="kpi-sub" id="kpi3to4Sub">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">4% – 5%</div>
+      <div class="kpi-value" id="kpi4to5">--</div>
+      <div class="kpi-sub" id="kpi4to5Sub">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">5% – 6%</div>
+      <div class="kpi-value" id="kpi5to6">--</div>
+      <div class="kpi-sub" id="kpi5to6Sub">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Above 6%</div>
+      <div class="kpi-value" id="kpiAbove6">--</div>
+      <div class="kpi-sub" id="kpiAbove6Sub">--</div>
+    </div>
+  </div>
+
+  <div class="card" id="stackedCard" style="display:none;">
+    <h2>Outstanding Mortgages by Interest Rate</h2>
+    <div class="chart-container">
+      <canvas id="stackedChart"></canvas>
+    </div>
+    <p class="legend-note">Source: FHFA NMDB — quarterly, closed-end first-lien residential mortgages.</p>
+  </div>
+
+  <div class="card" id="lineCard" style="display:none;">
+    <h2>Individual Rate Buckets Over Time</h2>
+    <div class="chart-container-md">
+      <canvas id="lineChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card" id="tableCard" style="display:none;">
+    <h2>Data Table</h2>
+    <div class="data-table-container">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th style="text-align:left">Quarter</th>
+            <th>&lt;3%</th>
+            <th>3–4%</th>
+            <th>4–5%</th>
+            <th>5–6%</th>
+            <th>&gt;6%</th>
+            <th>Under 4%</th>
+            <th>Under 5%</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="fredCard" style="display:none;">
+    <h2>Current Mortgage Rate (FRED)</h2>
+    <div class="chart-container-md">
+      <canvas id="fredChart"></canvas>
+    </div>
+    <p class="legend-note">30-Year Fixed Rate Mortgage Average (MORTGAGE30US) via FRED, weekly.</p>
+  </div>
+
+<script>
+const PROXY = "https://fred-proxy.patrick-grow.workers.dev";
+const CACHE_PREFIX = "fredcache_v2:";
+const CACHE_TTL = 12 * 60 * 60 * 1000;
+
+/* ---------- FRED fetch with caching ---------- */
+async function fetchSeries(seriesId) {
+  const cacheKey = CACHE_PREFIX + seriesId;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      const { ts, data } = JSON.parse(cached);
+      if (Date.now() - ts < CACHE_TTL) return data;
+    } catch {}
+  }
+  const resp = await fetch(`${PROXY}?series_id=${seriesId}`);
+  if (!resp.ok) throw new Error(`FRED ${seriesId}: ${resp.status}`);
+  const json = await resp.json();
+  const obs = (json.observations || [])
+    .map(o => ({ date: new Date(o.date + "T00:00:00"), value: parseFloat(o.value) }))
+    .filter(o => !isNaN(o.value))
+    .sort((a, b) => a.date - b.date);
+  localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: obs }));
+  return obs;
+}
+
+/* ---------- bucket colors ---------- */
+const COLORS = {
+  below3:  { bg: "rgba(26, 127, 55, 0.75)",  border: "#1a7f37" },
+  r3to4:   { bg: "rgba(60, 120, 200, 0.75)", border: "#3c78c8" },
+  r4to5:   { bg: "rgba(255, 193, 7, 0.75)",  border: "#e6a800" },
+  r5to6:   { bg: "rgba(255, 120, 50, 0.75)", border: "#e65100" },
+  above6:  { bg: "rgba(176, 0, 32, 0.75)",   border: "#b00020" }
+};
+
+const LABELS = {
+  below3: "Below 3%",
+  r3to4:  "3% – 4%",
+  r4to5:  "4% – 5%",
+  r5to6:  "5% – 6%",
+  above6: "Above 6%"
+};
+
+let stackedChart = null;
+let lineChart = null;
+let fredChart = null;
+
+/* ---------- render stacked area chart ---------- */
+function renderStackedChart(data) {
+  const labels = data.map(d => d.quarter);
+  const keys = ["below3", "r3to4", "r4to5", "r5to6", "above6"];
+
+  const datasets = keys.map(key => ({
+    label: LABELS[key],
+    data: data.map(d => d[key]),
+    backgroundColor: COLORS[key].bg,
+    borderColor: COLORS[key].border,
+    borderWidth: 1,
+    fill: true,
+    pointRadius: 0,
+    tension: 0.2
+  }));
+
+  if (stackedChart) stackedChart.destroy();
+
+  stackedChart = new Chart(document.getElementById("stackedChart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`,
+            footer: items => {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              return `Total: ${total.toFixed(1)}%`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { maxTicksLimit: 16 }
+        },
+        y: {
+          stacked: true,
+          min: 0,
+          max: 100,
+          title: { display: true, text: "% of Outstanding Mortgages" },
+          ticks: { callback: v => v + "%" }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- render individual lines chart ---------- */
+function renderLineChart(data) {
+  const labels = data.map(d => d.quarter);
+  const keys = ["below3", "r3to4", "r4to5", "r5to6", "above6"];
+
+  const datasets = keys.map(key => ({
+    label: LABELS[key],
+    data: data.map(d => d[key]),
+    borderColor: COLORS[key].border,
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    pointRadius: 2,
+    pointHoverRadius: 5,
+    tension: 0.2,
+    fill: false
+  }));
+
+  if (lineChart) lineChart.destroy();
+
+  lineChart = new Chart(document.getElementById("lineChart"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: "top",
+          onHover: (evt, legendItem, legend) => {
+            const chart = legend.chart;
+            chart.data.datasets.forEach((ds, i) => {
+              if (!ds._origBorderColor) {
+                ds._origBorderColor = ds.borderColor;
+                ds._origBorderWidth = ds.borderWidth;
+                ds._origPointRadius = ds.pointRadius;
+              }
+              if (i === legendItem.datasetIndex) {
+                ds.borderWidth = 4; ds.pointRadius = 4; ds.borderColor = ds._origBorderColor;
+              } else {
+                ds.borderWidth = 1; ds.pointRadius = 0; ds.borderColor = ds._origBorderColor + "30";
+              }
+            });
+            chart.update("none");
+          },
+          onLeave: (evt, legendItem, legend) => {
+            const chart = legend.chart;
+            chart.data.datasets.forEach(ds => {
+              if (ds._origBorderColor) {
+                ds.borderColor = ds._origBorderColor;
+                ds.borderWidth = ds._origBorderWidth;
+                ds.pointRadius = ds._origPointRadius;
+              }
+            });
+            chart.update("none");
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 16 } },
+        y: {
+          title: { display: true, text: "% of Outstanding Mortgages" },
+          ticks: { callback: v => v + "%" }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- render data table ---------- */
+function renderTable(data) {
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = data.slice().reverse().map(d => {
+    const under4 = (d.below3 + d.r3to4).toFixed(1);
+    const under5 = (d.below3 + d.r3to4 + d.r4to5).toFixed(1);
+    return `<tr>
+      <td style="text-align:left">${d.quarter}</td>
+      <td>${d.below3.toFixed(1)}%</td>
+      <td>${d.r3to4.toFixed(1)}%</td>
+      <td>${d.r4to5.toFixed(1)}%</td>
+      <td>${d.r5to6.toFixed(1)}%</td>
+      <td>${d.above6.toFixed(1)}%</td>
+      <td><strong>${under4}%</strong></td>
+      <td><strong>${under5}%</strong></td>
+    </tr>`;
+  }).join("");
+}
+
+/* ---------- update KPI tiles ---------- */
+function updateKPIs(data) {
+  if (!data.length) return;
+  const latest = data[data.length - 1];
+  const prev = data.length >= 5 ? data[data.length - 5] : null; // ~1 year ago (4 quarters)
+
+  const buckets = [
+    { key: "below3", valId: "kpiBelow3", subId: "kpiBelow3Sub" },
+    { key: "r3to4",  valId: "kpi3to4",   subId: "kpi3to4Sub" },
+    { key: "r4to5",  valId: "kpi4to5",   subId: "kpi4to5Sub" },
+    { key: "r5to6",  valId: "kpi5to6",   subId: "kpi5to6Sub" },
+    { key: "above6", valId: "kpiAbove6", subId: "kpiAbove6Sub" }
+  ];
+
+  buckets.forEach(b => {
+    document.getElementById(b.valId).textContent = latest[b.key].toFixed(1) + "%";
+    if (prev) {
+      const diff = latest[b.key] - prev[b.key];
+      const sign = diff >= 0 ? "+" : "";
+      const el = document.getElementById(b.subId);
+      el.textContent = `${sign}${diff.toFixed(1)}pp vs ${prev.quarter}`;
+      el.className = "kpi-sub";
+    }
+  });
+}
+
+/* ---------- render FRED mortgage rate chart ---------- */
+async function renderFredChart() {
+  try {
+    const rates = await fetchSeries("MORTGAGE30US");
+    const filtered = rates.filter(d => d.date >= new Date(2013, 0, 1));
+    const fmtDate = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short" });
+    const labels = filtered.map(d => fmtDate.format(d.date));
+    const values = filtered.map(d => d.value);
+
+    if (fredChart) fredChart.destroy();
+
+    fredChart = new Chart(document.getElementById("fredChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "30-Yr Fixed Rate (%)",
+          data: values,
+          borderColor: "rgba(60, 120, 200, 0.9)",
+          backgroundColor: "rgba(60, 120, 200, 0.08)",
+          tension: 0.2,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `30-Yr Fixed: ${ctx.parsed.y.toFixed(2)}%`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12 } },
+          y: {
+            title: { display: true, text: "Rate (%)" },
+            ticks: { callback: v => v.toFixed(1) + "%" }
+          }
+        }
+      }
+    });
+    document.getElementById("fredCard").style.display = "";
+  } catch (e) {
+    console.warn("Could not load FRED mortgage rate:", e);
+  }
+}
+
+/* ---------- main ---------- */
+async function loadData() {
+  const statusBox = document.getElementById("statusBox");
+
+  try {
+    const resp = await fetch("data/fhfa-mortgage-rates.json");
+    if (!resp.ok) throw new Error("Failed to load FHFA data: " + resp.status);
+    const json = await resp.json();
+    const data = json.data;
+
+    statusBox.style.display = "none";
+    document.getElementById("kpiRow").style.display = "";
+    document.getElementById("stackedCard").style.display = "";
+    document.getElementById("lineCard").style.display = "";
+    document.getElementById("tableCard").style.display = "";
+
+    updateKPIs(data);
+    renderStackedChart(data);
+    renderLineChart(data);
+    renderTable(data);
+
+    // Also load the FRED 30-year mortgage rate chart
+    renderFredChart();
+
+  } catch (err) {
+    statusBox.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+    console.error(err);
+  }
+}
+
+loadData();
+</script>
+
+</body>
+</html>
