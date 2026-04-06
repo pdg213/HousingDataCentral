@@ -85,6 +85,7 @@
       <a href="index.html" class="nav-btn">Dashboard</a>
       <a href="new-homes.html" class="nav-btn">New Homes</a>
       <a href="existing-homes.html" class="nav-btn active">Existing Homes</a>
+      <a href="mortgages.html" class="nav-btn">Mortgages</a>
       <a href="equities.html" class="nav-btn">Equities</a>
       <a href="raw-data.html" class="nav-btn">Raw Data</a>
     </div>
@@ -100,21 +101,29 @@
       <div class="kpi-label">Inventory</div>
       <div class="kpi-value" id="kpiInventory">--</div>
       <div class="kpi-sub" id="kpiInventoryYoY">--</div>
+      <div class="kpi-sub" id="kpiInventoryVs2023">--</div>
+      <div class="kpi-sub" id="kpiInventoryVs2019">--</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Existing Home Sales</div>
       <div class="kpi-value" id="kpiSales">--</div>
       <div class="kpi-sub" id="kpiSalesYoY">--</div>
+      <div class="kpi-sub" id="kpiSalesVs2023">--</div>
+      <div class="kpi-sub" id="kpiSalesVs2019">--</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Months of Supply</div>
       <div class="kpi-value" id="kpiMonths">--</div>
       <div class="kpi-sub" id="kpiMonthsSub">--</div>
+      <div class="kpi-sub" id="kpiMonthsVs2023">--</div>
+      <div class="kpi-sub" id="kpiMonthsVs2019">--</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Median Price</div>
       <div class="kpi-value" id="kpiPrice">--</div>
       <div class="kpi-sub" id="kpiPriceYoY">--</div>
+      <div class="kpi-sub" id="kpiPriceVs2023">--</div>
+      <div class="kpi-sub" id="kpiPriceVs2019">--</div>
     </div>
   </div>
 
@@ -317,12 +326,32 @@ function getLatestValue(data) {
   return data.length ? data[data.length - 1] : null;
 }
 
+function findByDate(data, target, toleranceMs) {
+  let best = null, bestDiff = Infinity;
+  for (const d of data) {
+    const diff = Math.abs(d.date.getTime() - target.getTime());
+    if (diff < bestDiff && diff < toleranceMs) { best = d; bestDiff = diff; }
+  }
+  return best;
+}
+
 function getYoYChange(data) {
-  if (data.length < 13) return null;
-  const current = data[data.length - 1].value;
-  const yearAgo = data[data.length - 13].value;
-  if (yearAgo === 0) return null;
-  return ((current - yearAgo) / yearAgo) * 100;
+  if (data.length < 2) return null;
+  const latest = data[data.length - 1];
+  const target = new Date(latest.date);
+  target.setFullYear(target.getFullYear() - 1);
+  const yearAgo = findByDate(data, target, 45 * 86400000);
+  if (!yearAgo || yearAgo.value === 0) return null;
+  return ((latest.value - yearAgo.value) / yearAgo.value) * 100;
+}
+
+function getChangeVsYear(data, year) {
+  if (data.length < 2) return null;
+  const latest = data[data.length - 1];
+  const targetDate = new Date(year, latest.date.getMonth(), 1);
+  const match = findByDate(data, targetDate, 45 * 86400000);
+  if (!match || match.value === 0) return null;
+  return ((latest.value - match.value) / match.value) * 100;
 }
 
 function formatYoY(val) {
@@ -348,14 +377,15 @@ function filterByYears(data, years) {
 
 function calculateChanges(data, years) {
   const result = [];
+  const tolerance = 45 * 86400000;
   for (let i = 0; i < data.length; i++) {
     const current = data[i];
     let yoyChange = null;
     let qoqChange = null;
-    if (i >= 12) {
-      const yearAgo = data[i - 12].value;
-      if (yearAgo !== 0) yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
-    }
+    const targetYoY = new Date(current.date);
+    targetYoY.setFullYear(targetYoY.getFullYear() - 1);
+    const yearAgo = findByDate(data, targetYoY, tolerance);
+    if (yearAgo && yearAgo.value !== 0) yoyChange = ((current.value - yearAgo.value) / yearAgo.value) * 100;
     if (i >= 6) {
       const curr3mo = (data[i].value + data[i - 1].value + data[i - 2].value) / 3;
       const prev3mo = (data[i - 3].value + data[i - 4].value + data[i - 5].value) / 3;
@@ -845,6 +875,18 @@ function renderConsolidatedTable(allData) {
 }
 
 /* ---------- KPIs ---------- */
+function formatVsYear(val, year) {
+  if (val === null) return "N/A";
+  const sign = val >= 0 ? "+" : "";
+  return `${sign}${val.toFixed(1)}% vs ${year}`;
+}
+
+function setVsYearEl(elId, val, year) {
+  const el = document.getElementById(elId);
+  el.textContent = formatVsYear(val, year);
+  el.className = "kpi-sub" + (val != null ? (val >= 0 ? " positive" : " negative") : "");
+}
+
 function updateKPIs(allData) {
   const inv = allData.inventory;
   const sales = allData.sales;
@@ -858,6 +900,8 @@ function updateKPIs(allData) {
   const invYoYEl = document.getElementById("kpiInventoryYoY");
   invYoYEl.textContent = formatYoY(invYoY);
   invYoYEl.className = "kpi-sub" + (invYoY != null ? (invYoY >= 0 ? " positive" : " negative") : "");
+  setVsYearEl("kpiInventoryVs2023", getChangeVsYear(inv, 2023), 2023);
+  setVsYearEl("kpiInventoryVs2019", getChangeVsYear(inv, 2019), 2019);
 
   // Sales
   const latestSales = getLatestValue(sales);
@@ -866,6 +910,8 @@ function updateKPIs(allData) {
   const salesYoYEl = document.getElementById("kpiSalesYoY");
   salesYoYEl.textContent = formatYoY(salesYoY);
   salesYoYEl.className = "kpi-sub" + (salesYoY != null ? (salesYoY >= 0 ? " positive" : " negative") : "");
+  setVsYearEl("kpiSalesVs2023", getChangeVsYear(sales, 2023), 2023);
+  setVsYearEl("kpiSalesVs2019", getChangeVsYear(sales, 2019), 2019);
 
   // Months of supply
   const latestMonths = getLatestValue(months);
@@ -877,6 +923,8 @@ function updateKPIs(allData) {
     else if (v <= 6) { monthsSub.textContent = "Balanced (4–6 mo)"; monthsSub.className = "kpi-sub positive"; }
     else { monthsSub.textContent = "Loose market (>6 mo)"; monthsSub.className = "kpi-sub"; }
   }
+  setVsYearEl("kpiMonthsVs2023", getChangeVsYear(months, 2023), 2023);
+  setVsYearEl("kpiMonthsVs2019", getChangeVsYear(months, 2019), 2019);
 
   // Median price
   const latestPrice = getLatestValue(price);
@@ -885,6 +933,8 @@ function updateKPIs(allData) {
   const priceYoYEl = document.getElementById("kpiPriceYoY");
   priceYoYEl.textContent = formatYoY(priceYoY);
   priceYoYEl.className = "kpi-sub" + (priceYoY != null ? (priceYoY >= 0 ? " positive" : " negative") : "");
+  setVsYearEl("kpiPriceVs2023", getChangeVsYear(price, 2023), 2023);
+  setVsYearEl("kpiPriceVs2019", getChangeVsYear(price, 2019), 2019);
 }
 
 /* ---------- main ---------- */

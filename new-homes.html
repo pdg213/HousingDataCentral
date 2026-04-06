@@ -82,6 +82,7 @@
       <a href="index.html" class="nav-btn">Dashboard</a>
       <a href="new-homes.html" class="nav-btn active">New Homes</a>
       <a href="existing-homes.html" class="nav-btn">Existing Homes</a>
+      <a href="mortgages.html" class="nav-btn">Mortgages</a>
       <a href="equities.html" class="nav-btn">Equities</a>
       <a href="raw-data.html" class="nav-btn">Raw Data</a>
     </div>
@@ -294,11 +295,13 @@ function getLatestValue(data) {
 }
 
 function getYoYChange(data) {
-  if (data.length < 13) return null;
-  const current = data[data.length - 1].value;
-  const yearAgo = data[data.length - 13].value;
-  if (yearAgo === 0) return null;
-  return ((current - yearAgo) / yearAgo) * 100;
+  if (data.length < 2) return null;
+  const latest = data[data.length - 1];
+  const target = new Date(latest.date);
+  target.setFullYear(target.getFullYear() - 1);
+  const yearAgo = findByDate(data, target, 45 * 86400000);
+  if (!yearAgo || yearAgo.value === 0) return null;
+  return ((latest.value - yearAgo.value) / yearAgo.value) * 100;
 }
 
 function formatYoY(val) {
@@ -314,19 +317,30 @@ function formatChange(value) {
   return `<span class="${cls}">${sign}${value.toFixed(1)}%</span>`;
 }
 
+function findByDate(data, target, toleranceMs) {
+  let best = null, bestDiff = Infinity;
+  for (const d of data) {
+    const diff = Math.abs(d.date.getTime() - target.getTime());
+    if (diff < bestDiff && diff < toleranceMs) { best = d; bestDiff = diff; }
+  }
+  return best;
+}
+
 function calculateChanges(data, years) {
   const result = [];
-  
+  const tolerance = 45 * 86400000; // 45 days
+
   for (let i = 0; i < data.length; i++) {
     const current = data[i];
     let yoyChange = null;
     let qoqChange = null;
 
-    if (i >= 12) {
-      const yearAgo = data[i - 12].value;
-      if (yearAgo !== 0) {
-        yoyChange = ((current.value - yearAgo) / yearAgo) * 100;
-      }
+    // Date-based YoY lookup (matches chart tooltip logic)
+    const targetYoY = new Date(current.date);
+    targetYoY.setFullYear(targetYoY.getFullYear() - 1);
+    const yearAgo = findByDate(data, targetYoY, tolerance);
+    if (yearAgo && yearAgo.value !== 0) {
+      yoyChange = ((current.value - yearAgo.value) / yearAgo.value) * 100;
     }
 
     if (i >= 3) {
