@@ -256,16 +256,12 @@ function filterByYears(data, years) {
   return data.filter(d => d.date >= cutoff);
 }
 
-function computeYoY(fullSeries, filteredSeries) {
-  return filteredSeries.map(d => {
-    const targetTime = new Date(d.date);
-    targetTime.setFullYear(targetTime.getFullYear() - 1);
-    const yearAgo = fullSeries.find(s =>
-      Math.abs(s.date.getTime() - targetTime.getTime()) < 45 * 86400000
-    );
-    if (!yearAgo || yearAgo.value === 0) return null;
-    return ((d.value - yearAgo.value) / yearAgo.value) * 100;
-  });
+function computeYoYForValue(fullSeries, date, value) {
+  const targetTime = new Date(date);
+  targetTime.setFullYear(targetTime.getFullYear() - 1);
+  const yearAgo = findByDate(fullSeries, targetTime, 45 * 86400000);
+  if (!yearAgo || yearAgo.value === 0) return null;
+  return ((value - yearAgo.value) / yearAgo.value) * 100;
 }
 
 function formatYoYTooltip(yoyVal) {
@@ -446,12 +442,13 @@ function renderFlowChart(permits, starts, sales, years) {
   const filteredStarts = filterByYears(starts, years);
   const filteredSales = filterByYears(sales, years);
 
-  const yoyPermits = computeYoY(permits, filteredPermits);
-  const yoyStarts = computeYoY(starts, filteredStarts);
-  const yoySales = computeYoY(sales, filteredSales);
-
   const aligned = alignDates([filteredPermits, filteredStarts, filteredSales]);
   const labels = aligned.map(a => fmtMonth.format(a.date));
+
+  // Compute YoY after alignment so indices match
+  const yoyPermits = aligned.map(a => a.values[0] ? computeYoYForValue(permits, a.date, a.values[0].value) : null);
+  const yoyStarts = aligned.map(a => a.values[1] ? computeYoYForValue(starts, a.date, a.values[1].value) : null);
+  const yoySales = aligned.map(a => a.values[2] ? computeYoYForValue(sales, a.date, a.values[2].value) : null);
 
   if (flowChart) flowChart.destroy();
 
@@ -529,11 +526,12 @@ function renderStockChart(underConst, inventory, years) {
   const filteredUnderConst = filterByYears(underConst, years);
   const filteredInventory = filterByYears(inventory, years);
 
-  const yoyUnderConst = computeYoY(underConst, filteredUnderConst);
-  const yoyInventory = computeYoY(inventory, filteredInventory);
-
   const aligned = alignDates([filteredUnderConst, filteredInventory]);
   const labels = aligned.map(a => fmtMonth.format(a.date));
+
+  // Compute YoY after alignment so indices match
+  const yoyUnderConst = aligned.map(a => a.values[0] ? computeYoYForValue(underConst, a.date, a.values[0].value) : null);
+  const yoyInventory = aligned.map(a => a.values[1] ? computeYoYForValue(inventory, a.date, a.values[1].value) : null);
 
   if (stockChart) stockChart.destroy();
 
