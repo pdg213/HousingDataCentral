@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Affordability Calculator — Preview</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --border:#e6e6e6; --muted:#666; --bg:#ffffff; --card:#ffffff;
+      --shadow:0 1px 10px rgba(0,0,0,0.04); --primary:#3c78c8;
+    }
+    * { box-sizing:border-box; }
+    body { font-family:Arial,sans-serif; margin:22px; line-height:1.35; background:var(--bg); color:#111; }
+    h1 { margin:0 0 6px; font-size:22px; }
+    .sub { color:var(--muted); margin:0 0 16px; font-size:13px; }
+
+    .card { border:1px solid var(--border); border-radius:12px; padding:14px; background:var(--card); box-shadow:var(--shadow); margin-bottom:16px; }
+    .card h2 { margin:0 0 12px; font-size:16px; }
+
+    .kpi-row { display:flex; flex-wrap:wrap; gap:12px; margin:16px 0; }
+    .kpi-card { flex:1; min-width:120px; max-width:200px; border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--card); box-shadow:var(--shadow); }
+    .kpi-label { font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:4px; }
+    .kpi-value { font-size:22px; font-weight:600; color:#111; }
+    .kpi-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+
+    .chart-container { height:320px; margin-bottom:8px; }
+    canvas { width:100%!important; height:100%!important; }
+    .legend-note { font-size:11px; color:var(--muted); margin-top:8px; }
+
+    /* Inputs */
+    .assumptions-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media(max-width:700px){ .assumptions-grid { grid-template-columns:1fr; } }
+    .input-section h3 { font-size:13px; color:var(--muted); text-transform:uppercase; margin:0 0 10px; }
+    .input-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; }
+    .input-row label { font-size:13px; color:#333; flex:1; }
+    .input-row input[type="number"], .input-row select {
+      width:110px; padding:7px 10px; border:1px solid var(--border); border-radius:8px;
+      font-size:14px; text-align:right; background:#fff;
+    }
+    .input-row input:focus, .input-row select:focus { border-color:var(--primary); outline:none; }
+    .pmi-indicator { font-size:11px; padding:3px 10px; border-radius:999px; display:inline-block; margin-top:4px; }
+    .pmi-on { background:rgba(176,0,32,0.08); color:#b00020; border:1px solid rgba(176,0,32,0.2); }
+    .pmi-off { background:rgba(26,127,55,0.08); color:#1a7f37; border:1px solid rgba(26,127,55,0.2); }
+
+    /* Data table */
+    .table-scroll { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { padding:6px 10px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; }
+    th { background:#f9f9f9; font-weight:600; position:sticky; top:0; }
+    td:first-child, th:first-child { text-align:left; position:sticky; left:0; background:#fff; z-index:1; min-width:180px; font-weight:500; }
+    th:first-child { background:#f9f9f9; z-index:2; }
+    tr:hover { background:#f5f8fc; }
+    .section-row td { background:#f0f4f8; font-weight:600; font-size:11px; text-transform:uppercase; color:var(--muted); border-bottom:2px solid var(--border); }
+    .highlight-row td { background:#eef3fb; font-weight:600; }
+    .positive { color:#1a7f37; }
+    .negative { color:#b00020; }
+  </style>
+</head>
+<body>
+
+  <h1>Affordability Calculator</h1>
+  <p class="sub">Total Cost of Ownership as % of Median Household Income — Atlanta Fed methodology. TCO = Mortgage P&I + Property Tax + Insurance + PMI.</p>
+
+  <!-- ASSUMPTIONS -->
+  <div class="card">
+    <h2>Assumptions</h2>
+    <div class="assumptions-grid">
+      <div class="input-section">
+        <h3>Loan & Cost Parameters</h3>
+        <div class="input-row"><label>Down Payment %</label><input type="number" id="inDown" value="20" min="0" max="100" step="0.5"></div>
+        <div class="input-row"><label>Property Tax Rate %</label><input type="number" id="inTax" value="1.1" min="0" max="5" step="0.1"></div>
+        <div class="input-row"><label>Insurance Rate %</label><input type="number" id="inIns" value="0.6" min="0" max="5" step="0.1"></div>
+        <div class="input-row"><label>PMI Rate % (if down &lt;20%)</label><input type="number" id="inPMI" value="0.5" min="0" max="3" step="0.1"></div>
+        <div class="input-row"><label>Loan Term (years)</label>
+          <select id="inTerm"><option value="15">15</option><option value="20">20</option><option value="25">25</option><option value="30" selected>30</option></select>
+        </div>
+        <span class="pmi-indicator pmi-off" id="pmiLabel">PMI: No</span>
+      </div>
+      <div class="input-section">
+        <h3>Market Assumptions</h3>
+        <div class="input-row"><label>Median Home Price ($)</label><input type="number" id="inPrice" value="420000" min="0" step="5000"></div>
+        <div class="input-row"><label>Home Price Appreciation %</label><input type="number" id="inAppreciation" value="3.0" min="-10" max="20" step="0.5"></div>
+        <div class="input-row"><label>Median Household Income ($)</label><input type="number" id="inIncome" value="80610" min="0" step="500"></div>
+        <div class="input-row"><label>Income Growth %</label><input type="number" id="inIncomeGrowth" value="3.5" min="-10" max="20" step="0.5"></div>
+        <div class="input-row"><label>30-Year Mortgage Rate %</label><input type="number" id="inRate" value="6.0" min="0" max="20" step="0.25"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI TILES -->
+  <div class="kpi-row" id="kpiRow">
+    <div class="kpi-card"><div class="kpi-label">TCO % of Income</div><div class="kpi-value" id="kpiTCO">--</div><div class="kpi-sub" id="kpiTCOsub">--</div></div>
+    <div class="kpi-card"><div class="kpi-label">Monthly Payment</div><div class="kpi-value" id="kpiMonthly">--</div><div class="kpi-sub">Total cost of ownership</div></div>
+    <div class="kpi-card"><div class="kpi-label">Monthly Income</div><div class="kpi-value" id="kpiIncome">--</div><div class="kpi-sub">Median household</div></div>
+    <div class="kpi-card"><div class="kpi-label">Down Payment</div><div class="kpi-value" id="kpiDown">--</div><div class="kpi-sub" id="kpiDownSub">--</div></div>
+  </div>
+
+  <!-- CHART 1: TCO% over time -->
+  <div class="card"><h2>TCO as % of Median Income — 10-Year Projection</h2><div class="chart-container"><canvas id="tcoChart"></canvas></div><p class="legend-note">Dashed line = 30% affordability threshold (HUD guideline). Lower is more affordable.</p></div>
+
+  <!-- CHART 2: Monthly cost breakdown -->
+  <div class="card"><h2>Monthly Cost Breakdown</h2><div class="chart-container"><canvas id="breakdownChart"></canvas></div></div>
+
+  <!-- CHART 3: Rate sensitivity -->
+  <div class="card"><h2>Mortgage Rate Sensitivity — TCO % of Income</h2><div class="chart-container"><canvas id="rateChart"></canvas></div><p class="legend-note">Shows how different mortgage rates affect affordability over 10 years, holding all other assumptions constant.</p></div>
+
+  <!-- CHART 4: Down payment sensitivity -->
+  <div class="card"><h2>Down Payment Sensitivity — TCO % of Income</h2><div class="chart-container"><canvas id="dpChart"></canvas></div><p class="legend-note">Shows impact of down payment on affordability. PMI applies when down payment is below 20%.</p></div>
+
+  <!-- DATA TABLE -->
+  <div class="card">
+    <h2>10-Year Projection Detail</h2>
+    <div class="table-scroll"><table id="projTable"></table></div>
+  </div>
+
+  <!-- METHODOLOGY -->
+  <div class="card">
+    <h2>Methodology</h2>
+    <p style="font-size:13px; color:var(--muted); margin:0;">
+      Based on the Atlanta Fed Home Ownership Affordability Monitor. Total Cost of Ownership (TCO) = Annual Mortgage P&I + Annual Property Tax + Annual Homeowners Insurance + Annual PMI (if applicable). Affordability ratio = TCO / Median Household Income. A ratio above 30% is generally considered cost-burdened per HUD guidelines.
+    </p>
+  </div>
+
+<script>
+/* =========== FORMATTERS =========== */
+const fmtDollar = new Intl.NumberFormat("en-US", { style:"currency", currency:"USD", maximumFractionDigits:0 });
+const fmtNum = new Intl.NumberFormat("en-US", { maximumFractionDigits:0 });
+const fmtPct1 = v => v.toFixed(1) + "%";
+
+/* =========== CALCULATION ENGINE =========== */
+function monthlyPayment(principal, annualRate, years) {
+  const r = annualRate / 12;
+  const n = years * 12;
+  if (r === 0) return principal / n;
+  return principal * r / (1 - Math.pow(1 + r, -n));
+}
+
+function calculate(params) {
+  const rows = [];
+  for (let i = 0; i < 10; i++) {
+    const year = 2026 + i;
+    const price = params.basePrice * Math.pow(1 + params.appreciation, i);
+    const income = params.baseIncome * Math.pow(1 + params.incomeGrowth, i);
+    const down = price * params.downPct;
+    const loan = price - down;
+    const mPI = monthlyPayment(loan, params.rate, params.term);
+    const annualPI = mPI * 12;
+    const annualTax = price * params.taxRate;
+    const annualIns = price * params.insRate;
+    const annualPMI = params.downPct < 0.20 ? loan * params.pmiRate : 0;
+    const totalAnnual = annualPI + annualTax + annualIns + annualPMI;
+    const tcoPct = (totalAnnual / income) * 100;
+    rows.push({ year, price, income, down, loan, mPI, annualPI, annualTax, annualIns, annualPMI, totalAnnual, tcoPct, monthlyTCO: totalAnnual/12, monthlyIncome: income/12, appreciation: i===0 ? null : params.appreciation*100, incomeGrowth: params.incomeGrowth*100, rate: params.rate*100 });
+  }
+  return rows;
+}
+
+function readInputs() {
+  return {
+    downPct: parseFloat(document.getElementById("inDown").value) / 100 || 0.2,
+    taxRate: parseFloat(document.getElementById("inTax").value) / 100 || 0.011,
+    insRate: parseFloat(document.getElementById("inIns").value) / 100 || 0.006,
+    pmiRate: parseFloat(document.getElementById("inPMI").value) / 100 || 0.005,
+    term: parseInt(document.getElementById("inTerm").value) || 30,
+    basePrice: parseFloat(document.getElementById("inPrice").value) || 420000,
+    appreciation: parseFloat(document.getElementById("inAppreciation").value) / 100 || 0.03,
+    baseIncome: parseFloat(document.getElementById("inIncome").value) || 80610,
+    incomeGrowth: parseFloat(document.getElementById("inIncomeGrowth").value) / 100 || 0.035,
+    rate: parseFloat(document.getElementById("inRate").value) / 100 || 0.06
+  };
+}
+
+/* =========== CHARTS =========== */
+let tcoChart, breakdownChart, rateChart, dpChart;
+
+const thresholdPlugin = {
+  id: "threshold30",
+  afterDraw(chart) {
+    const yScale = chart.scales.y;
+    if (!yScale) return;
+    const y = yScale.getPixelForValue(30);
+    if (y < chart.chartArea.top || y > chart.chartArea.bottom) return;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = "rgba(176,0,32,0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(chart.chartArea.left, y);
+    ctx.lineTo(chart.chartArea.right, y);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(176,0,32,0.6)";
+    ctx.font = "11px Arial";
+    ctx.fillText("30% threshold", chart.chartArea.right - 85, y - 5);
+    ctx.restore();
+  }
+};
+
+function renderTCOChart(rows) {
+  if (tcoChart) tcoChart.destroy();
+  tcoChart = new Chart(document.getElementById("tcoChart"), {
+    type: "line",
+    data: {
+      labels: rows.map(r => r.year),
+      datasets: [{
+        label: "TCO as % of Income",
+        data: rows.map(r => r.tcoPct),
+        borderColor: "#3c78c8",
+        backgroundColor: "rgba(60,120,200,0.08)",
+        borderWidth: 3, pointRadius: 4, tension: 0.2, fill: true
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `TCO: ${ctx.parsed.y.toFixed(1)}% of income`, afterLabel: ctx => { const r = rows[ctx.dataIndex]; return `Monthly: ${fmtDollar.format(r.monthlyTCO)} / ${fmtDollar.format(r.monthlyIncome)}`; } } }
+      },
+      scales: {
+        y: { title: { display: true, text: "% of Median Income" }, ticks: { callback: v => v + "%" }, suggestedMin: 20, suggestedMax: 50 }
+      }
+    },
+    plugins: [thresholdPlugin]
+  });
+}
+
+function renderBreakdownChart(rows) {
+  if (breakdownChart) breakdownChart.destroy();
+  breakdownChart = new Chart(document.getElementById("breakdownChart"), {
+    type: "bar",
+    data: {
+      labels: rows.map(r => r.year),
+      datasets: [
+        { label: "P&I", data: rows.map(r => r.mPI), backgroundColor: "rgba(60,120,200,0.75)", borderRadius: 2 },
+        { label: "Property Tax", data: rows.map(r => r.annualTax / 12), backgroundColor: "rgba(0,150,136,0.75)", borderRadius: 2 },
+        { label: "Insurance", data: rows.map(r => r.annualIns / 12), backgroundColor: "rgba(255,193,7,0.75)", borderRadius: 2 },
+        { label: "PMI", data: rows.map(r => r.annualPMI / 12), backgroundColor: "rgba(176,0,32,0.75)", borderRadius: 2 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtDollar.format(ctx.parsed.y)}/mo`, footer: items => `Total: ${fmtDollar.format(items.reduce((s,i) => s + i.parsed.y, 0))}/mo` } }
+      },
+      scales: {
+        x: {},
+        y: { stacked: true, title: { display: true, text: "Monthly Cost ($)" }, ticks: { callback: v => "$" + fmtNum.format(v) } }
+      }
+    }
+  });
+}
+
+function renderRateChart(baseParams) {
+  if (rateChart) rateChart.destroy();
+  const baseRatePct = baseParams.rate * 100;
+  const scenarios = [-2, -1, 0, 1, 2].map(offset => {
+    const r = Math.max(0.5, baseRatePct + offset);
+    const p = { ...baseParams, rate: r / 100 };
+    return { label: r.toFixed(1) + "%", data: calculate(p).map(row => row.tcoPct), rate: r };
+  });
+  const colors = ["#1a7f37", "#3c78c8", "#111", "#e65100", "#b00020"];
+  rateChart = new Chart(document.getElementById("rateChart"), {
+    type: "line",
+    data: {
+      labels: scenarios[0].data.map((_, i) => 2026 + i),
+      datasets: scenarios.map((s, i) => ({
+        label: s.label,
+        data: s.data,
+        borderColor: colors[i],
+        borderWidth: i === 2 ? 3 : 1.5,
+        pointRadius: i === 2 ? 3 : 0,
+        tension: 0.2,
+        borderDash: i === 2 ? [] : [4, 2]
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label} rate: ${ctx.parsed.y.toFixed(1)}%` } }
+      },
+      scales: {
+        y: { title: { display: true, text: "TCO as % of Income" }, ticks: { callback: v => v + "%" } }
+      }
+    },
+    plugins: [thresholdPlugin]
+  });
+}
+
+function renderDPChart(baseParams) {
+  if (dpChart) dpChart.destroy();
+  const dpLevels = [5, 10, 15, 20, 25];
+  const colors = ["#b00020", "#e65100", "#e6a800", "#3c78c8", "#1a7f37"];
+  const datasets = dpLevels.map((dp, i) => {
+    const p = { ...baseParams, downPct: dp / 100 };
+    const rows = calculate(p);
+    return {
+      label: dp + "% down",
+      data: rows.map(r => r.tcoPct),
+      borderColor: colors[i],
+      borderWidth: dp === Math.round(baseParams.downPct * 100) ? 3 : 1.5,
+      pointRadius: dp === Math.round(baseParams.downPct * 100) ? 3 : 0,
+      tension: 0.2,
+      borderDash: dp === Math.round(baseParams.downPct * 100) ? [] : [4, 2]
+    };
+  });
+  dpChart = new Chart(document.getElementById("dpChart"), {
+    type: "line",
+    data: { labels: Array.from({ length: 10 }, (_, i) => 2026 + i), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "top" },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%` } }
+      },
+      scales: {
+        y: { title: { display: true, text: "TCO as % of Income" }, ticks: { callback: v => v + "%" } }
+      }
+    },
+    plugins: [thresholdPlugin]
+  });
+}
+
+/* =========== DATA TABLE =========== */
+function renderTable(rows) {
+  const table = document.getElementById("projTable");
+  const yearHeaders = rows.map(r => `<th>${r.year}</th>`).join("");
+
+  function dataRow(label, values, cls) {
+    return `<tr class="${cls||""}"><td>${label}</td>${values.map(v => `<td>${v}</td>`).join("")}</tr>`;
+  }
+  function sectionRow(label) {
+    return `<tr class="section-row"><td colspan="${rows.length+1}">${label}</td></tr>`;
+  }
+
+  const params = readInputs();
+  table.innerHTML = `
+    <thead><tr><th></th>${yearHeaders}</tr></thead>
+    <tbody>
+      ${sectionRow("Year-by-Year Assumptions")}
+      ${dataRow("Median Home Price", rows.map(r => fmtDollar.format(r.price)))}
+      ${dataRow("Home Price Apprec. (YoY)", rows.map((r,i) => i===0 ? "—" : fmtPct1(params.appreciation*100)))}
+      ${dataRow("Median Household Income", rows.map(r => fmtDollar.format(r.income)))}
+      ${dataRow("Income Growth (YoY)", rows.map(r => fmtPct1(params.incomeGrowth*100)))}
+      ${dataRow("30-Yr Mortgage Rate", rows.map(r => fmtPct1(params.rate*100)))}
+      ${sectionRow("Total Cost of Ownership Build-Up")}
+      ${dataRow("Down Payment ($)", rows.map(r => fmtDollar.format(r.down)))}
+      ${dataRow("Mortgage Amount ($)", rows.map(r => fmtDollar.format(r.loan)))}
+      ${dataRow("Monthly Mortgage P&I", rows.map(r => fmtDollar.format(r.mPI)))}
+      ${dataRow("Annual Mortgage P&I", rows.map(r => fmtDollar.format(r.annualPI)))}
+      ${dataRow("Annual Property Tax", rows.map(r => fmtDollar.format(r.annualTax)))}
+      ${dataRow("Annual Insurance", rows.map(r => fmtDollar.format(r.annualIns)))}
+      ${dataRow("Annual PMI", rows.map(r => fmtDollar.format(r.annualPMI)))}
+      ${dataRow("TOTAL ANNUAL TCO", rows.map(r => "<strong>" + fmtDollar.format(r.totalAnnual) + "</strong>"))}
+      ${sectionRow("Key Output")}
+      ${dataRow("TCO as % of Income", rows.map(r => "<strong>" + fmtPct1(r.tcoPct) + "</strong>"), "highlight-row")}
+      ${dataRow("Monthly TCO ($)", rows.map(r => fmtDollar.format(r.monthlyTCO)))}
+      ${dataRow("Monthly Income ($)", rows.map(r => fmtDollar.format(r.monthlyIncome)))}
+    </tbody>
+  `;
+}
+
+/* =========== KPI TILES =========== */
+function updateKPIs(rows) {
+  const r = rows[0];
+  document.getElementById("kpiTCO").textContent = fmtPct1(r.tcoPct);
+  document.getElementById("kpiTCOsub").textContent = r.tcoPct > 30 ? "Cost-burdened (>30%)" : "Below 30% threshold";
+  document.getElementById("kpiTCOsub").className = "kpi-sub " + (r.tcoPct > 30 ? "negative" : "positive");
+  document.getElementById("kpiMonthly").textContent = fmtDollar.format(r.monthlyTCO);
+  document.getElementById("kpiIncome").textContent = fmtDollar.format(r.monthlyIncome);
+  document.getElementById("kpiDown").textContent = fmtDollar.format(r.down);
+  document.getElementById("kpiDownSub").textContent = fmtPct1(readInputs().downPct * 100) + " of " + fmtDollar.format(r.price);
+
+  const pmiEl = document.getElementById("pmiLabel");
+  if (readInputs().downPct < 0.20) {
+    pmiEl.textContent = "PMI: Yes (" + fmtDollar.format(r.annualPMI / 12) + "/mo)";
+    pmiEl.className = "pmi-indicator pmi-on";
+  } else {
+    pmiEl.textContent = "PMI: No (down payment ≥ 20%)";
+    pmiEl.className = "pmi-indicator pmi-off";
+  }
+}
+
+/* =========== MAIN RECALC =========== */
+let debounceTimer;
+function recalculate() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    const params = readInputs();
+    const rows = calculate(params);
+    updateKPIs(rows);
+    renderTCOChart(rows);
+    renderBreakdownChart(rows);
+    renderRateChart(params);
+    renderDPChart(params);
+    renderTable(rows);
+  }, 50);
+}
+
+// Wire up all inputs
+document.querySelectorAll("input, select").forEach(el => {
+  el.addEventListener("input", recalculate);
+});
+
+// Initial render
+recalculate();
+</script>
+</body>
+</html>
